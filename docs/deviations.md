@@ -20,10 +20,24 @@ to Showdown at runtime (`applyRomOverrides`, test `showdown.test.ts`):
   submitted as a no-op and the item is applied at the start of the turn, before any move — the Gen 4 order.
 - Cynthia's level: scaled to 76 by default (`BattleConfig.cynthiaLevel`, `null` = ROM levels 60–66). Species, moves,
   items, natures (from her ROM-computed PIDs) and IVs (30) are untouched; she has 0 EVs as in the game.
-- Player team: max IVs, neutral (Hardy) nature, 0 EVs, no held items (brief defaults; see `GenOptions`).
+- Player team: max IVs, neutral (Hardy) nature, no held items (brief defaults), and 85 EVs in every stat (our call:
+  with 0 EVs a random team almost never beats a level-76 Cynthia; see `.claude/skills/gen4-battle-notes`). Configurable in `GenOptions`.
 - Bag: the player carries no items, so BAG shows the ROM line "Items can't be used here." RUN shows the ROM line
   "No! There's no running from a Trainer battle!".
 - No EXP is awarded (the EXP bar is not drawn).
+
+## Cynthia's AI
+- Her AI flags in the Diamond ROM are `0x01` (**Basic** only), like every trainer in the game. Basic mostly removes useless
+  moves (immunities, absorb abilities, redundant status/stat moves); it does not chase the strongest move. Harder flags
+  can be enabled with `BattleConfig.aiFlags`, but that is not what Diamond does.
+- The AI is our TypeScript interpreter of the ROM's own bytecode (`tr_ai_seq.narc`), with command semantics from pret's
+  decompilation. Approximations (what the AI "knows" about the player, a simplified damage estimate that Basic only uses
+  for a yes/no comparison, Quick Claw ignored in speed checks) are listed in `.claude/skills/gen4-battle-notes`.
+- **Item-use quirk, kept on purpose**: `TrainerAI_ShouldUseItem` has no `break`, so one Full Restore use also empties every
+  later item slot that passes the "alive Pokémon ≤ items − slot + 1" gate. With 5–6 Pokémon alive Cynthia can use only her
+  first Full Restore; at 3 alive one use can burn three. This is read straight from the decompiled C (verified by us);
+  we could not confirm it on hardware.
+- The AI uses its own Gen 4 RNG stream, not Showdown's.
 
 ## Presentation
 - **Move animations**: Diamond's particle/BG move animations are not reproduced. Attacks show a small attacker

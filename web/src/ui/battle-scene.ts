@@ -1,7 +1,7 @@
 import type { Pokemon } from '@pkmn/sim';
 import type { GameData } from '../data';
 import type { DailyBattle } from '../battle/engine';
-import { Translator, type Side, type UIEvent } from '../battle/protocol';
+import { fillTemplate, Translator, type Side, type UIEvent } from '../battle/protocol';
 import { dex } from '../battle/showdown';
 import { type GfxMeta, image, pokemonSprite, type RomFont, type Sound, STYLE_DARK, STYLE_LIGHT } from './assets';
 import { type DS, H, sleep, W } from './screen';
@@ -10,7 +10,7 @@ import { button, hit } from './widgets';
 // Layout (DS pixels, top screen). Platform centers follow pret's battle_display.c (enemy 192,88; player 64,136).
 const ENEMY = { x: 192, y: 88, foot: 92 };
 const PLAYER = { x: 64, y: 136, foot: 150 };
-const HPBOX = { enemy: { x: 0, y: 6 }, player: { x: 128, y: 78 } };
+const HPBOX = { enemy: { x: 0, y: 6 }, player: { x: 128, y: 88 } };
 const MSG_Y = 144;
 
 export const TYPE_COLORS: Record<string, string> = {
@@ -60,7 +60,9 @@ export class BattleScene {
     loop();
     try {
       await this.introSequence();
-      await this.play(this.tr.translate(this.engine.takeLog()));
+      // Showdown logs the lead switch-ins p1 first; in DP the trainer sends out first, then "Go! …".
+      const opening = this.tr.translate(this.engine.takeLog());
+      await this.play([...opening.filter(e => e.t === 'switch' && e.side === 'p2'), ...opening.filter(e => !(e.t === 'switch' && e.side === 'p2'))]);
       while (!this.engine.ended) {
         const choice = await this.askPlayer();
         if (!this.engine.choose(choice)) continue;
@@ -192,7 +194,7 @@ export class BattleScene {
   // ------------------------------------------------------------- text
 
   private fillBattle(idx: number, ...vars: string[]) {
-    return this.data.text.battle[idx].replace(/\{([0-9A-F]{4}):(\d+)\}/g, (_, _c, i) => vars[+i] ?? '');
+    return fillTemplate(this.data.text.battle[idx], vars);
   }
 
   /** Typewriter text in the message window. Pages split on \r and \f; 'press' waits for A, 'auto' for a beat. */
@@ -210,7 +212,13 @@ export class BattleScene {
         }
       }
       if (wait === 'press') await this.waitA();
-      else if (wait === 'auto') await this.ds.nextOrTimeout(fast ? 450 : 900);
+      else if (wait === 'auto') { // a beat, or A/B/tap to hurry it; arrows never advance text
+        const until = performance.now() + (fast ? 450 : 900);
+        for (let left = until - performance.now(); left > 0; left = until - performance.now()) {
+          const i = await this.ds.nextOrTimeout(left);
+          if (!i || 'tap' in i || i.key === 'a' || i.key === 'b') break;
+        }
+      }
     }
   }
 
@@ -224,6 +232,7 @@ export class BattleScene {
   // ------------------------------------------------------------- player input
 
   private async askPlayer(): Promise<string> {
+    this.ds.clearInput(); // presses buffered during messages must not pick a move
     const b = this.engine.battle;
     const me = b.p1.active[0];
     if (this.engine.needs === 'switch') {

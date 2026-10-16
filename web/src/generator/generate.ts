@@ -41,7 +41,9 @@ export interface GenOptions {
   minDamagingMoves: number;
   evs: number; // per stat
 }
-export const DEFAULT_OPTIONS: GenOptions = { level: 76, minDamagingMoves: 2, evs: 0 };
+// 85 EVs per stat = the Gen 4 cap of 510 spread evenly: a "trained" level-76 team. With 0 EVs the greedy bot
+// won 5% of battles vs. 18% with 85 (scripts/tune.ts, 40 seeds), so most days needed rerolls.
+export const DEFAULT_OPTIONS: GenOptions = { level: 76, minDamagingMoves: 2, evs: 85 };
 
 export interface GenMon {
   species: number; // national dex = ROM id

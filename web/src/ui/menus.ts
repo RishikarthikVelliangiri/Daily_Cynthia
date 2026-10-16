@@ -31,6 +31,7 @@ async function pick(ctx: MenuCtx, btns: Btn[], back?: string, drawTop?: () => vo
     });
   };
   render();
+  ds.clearInput();
   for (;;) {
     const i = await ds.next();
     if ('tap' in i) {

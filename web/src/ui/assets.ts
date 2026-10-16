@@ -50,9 +50,10 @@ export class RomFont {
     const d = g.getImageData(0, 0, c.width, c.height);
     const parse = (hex: string) => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
     const fg = parse(style.color), sh = parse(style.shadow);
+    // Threshold rather than test for non-zero: anti-fingerprinting browsers add ±1 noise to getImageData.
     for (let i = 0; i < d.data.length; i += 4) {
-      const [r, gg] = [d.data[i], d.data[i + 1]];
-      const col = r ? fg : gg ? sh : null;
+      const [r, gg, a] = [d.data[i], d.data[i + 1], d.data[i + 3]];
+      const col = a < 128 ? null : r > 127 ? fg : gg > 127 ? sh : null;
       if (col) { d.data[i] = col[0]; d.data[i + 1] = col[1]; d.data[i + 2] = col[2]; d.data[i + 3] = 255; }
       else d.data[i + 3] = 0;
     }

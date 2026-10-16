@@ -48,8 +48,9 @@ export class DS {
 
   /** Largest integer scale that fits both screens in the viewport. */
   fit() {
-    const gap = 8;
-    const s = Math.max(1, Math.floor(Math.min((innerWidth - 16) / W, (innerHeight - 96) / (H * 2 + gap))));
+    // Console = two screens + bezel/padding (28 DS px tall, 24 wide incl. speakers); page chrome ~120 CSS px.
+    const raw = Math.min((innerWidth - 32) / (W + 40), (innerHeight - 120) / (H * 2 + 28));
+    const s = raw >= 2 ? Math.floor(raw) : Math.max(1, raw); // integer when possible, never overflow
     for (const c of [this.top.canvas, this.bottom.canvas]) {
       c.style.width = `${W * s}px`;
       c.style.height = `${H * s}px`;

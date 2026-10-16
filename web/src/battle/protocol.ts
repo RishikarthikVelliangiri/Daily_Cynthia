@@ -31,13 +31,19 @@ const T = {
 const STAT_INDEX: Record<string, number> = { atk: 1, def: 2, spe: 3, spa: 4, spd: 5, accuracy: 6, evasion: 7 };
 const STATUS_MSG: Record<string, number> = { slp: T.asleep, psn: T.poisoned, tox: T.badlyPoisoned, brn: T.burned, frz: T.frozen, par: T.paralyzed };
 
+/** Fill a ROM text template: {01xx:n} are variables (names, moves, …); other commands (02xx waits/yes-no,
+ * FFxx colors) are control codes and render as nothing. */
+export function fillTemplate(tpl: string, vars: (string | number)[]): string {
+  return tpl.replace(/\{([0-9A-F]{4}):(\d+)\}/g, (_, cmd: string, i: string) => (cmd.startsWith('01') ? String(vars[+i] ?? '') : ''));
+}
+
 export class Translator {
   private names: Record<Side, string> = { p1: '', p2: '' };
   private intimidator: Side | null = null;
   constructor(private data: GameData, private playerName = 'Player', private trainer = 'Cynthia') {}
 
   private fill(tpl: string, vars: (string | number)[]): string {
-    return tpl.replace(/\{([0-9A-F]{4}):(\d+)\}/g, (_, cmd: string, i: string) => (cmd === '0200' ? '' : String(vars[+i] ?? '')));
+    return fillTemplate(tpl, vars);
   }
   /** Triplet template: player side uses base, Cynthia's side uses the "The foe's" variant (+2). */
   private side(idx: number, side: Side, ...vars: (string | number)[]) {

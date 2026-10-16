@@ -1,0 +1,13 @@
+100/1000  pass 29.0%  (274 ms/seed)
+200/1000  pass 29.5%  (261 ms/seed)
+300/1000  pass 27.7%  (255 ms/seed)
+400/1000  pass 29.8%  (248 ms/seed)
+500/1000  pass 32.4%  (243 ms/seed)
+600/1000  pass 33.2%  (239 ms/seed)
+700/1000  pass 33.9%  (237 ms/seed)
+800/1000  pass 34.3%  (234 ms/seed)
+900/1000  pass 34.1%  (233 ms/seed)
+1000/1000  pass 34.3%  (234 ms/seed)
+
+Raw pass rate over 1000 seeds (bot wins at least 1 of 4): 34.3%
+Days needing a reroll: 65.7%

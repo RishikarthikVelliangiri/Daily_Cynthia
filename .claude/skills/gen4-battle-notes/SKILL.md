@@ -107,3 +107,30 @@ defender, discarding and retrying otherwise; stage 2 = highest u8 `CalcMoveDamag
 - Unimplemented (throw `UnimplementedAICommand`, caught -> fallback): Dummy3E/3F (never advance the cursor on DS),
   CheckIfHighestDamageWithPartner, IfBattlerFainted/NotFainted, LoadTypeFrom partner targets, any partner battler
   code. None are reachable from Basic (verified by a static walk in `ai.test.ts`).
+
+## Battle engine (Showdown wrapper)
+
+Code: `web/src/battle/engine.ts` (`DailyBattle`), `showdown.ts`, `protocol.ts`, `bot.ts`.
+- `@pkmn/sim` Gen 4 (`gen4customgame`), driven synchronously: `p1.choose()` then `driveCynthia()` which answers p2's
+  request with the AI and calls `commitChoices()` whenever all sides have chosen (loops to cover p2-only forced switches).
+- Battle seed: Showdown wants a string `"a,b,c,d"` (arrays work at runtime but don't typecheck).
+- Trainer items: AI returns `{kind:'item'}` → p2 pushes a raw `{choice:'pass'}` action; the heal is applied right before
+  `commitChoices()` (Gen 4: items before moves). `runAction('pass')` is a no-op in Showdown.
+- **ROM vs Showdown data**: only Hypnosis acc (70 vs 60) and Endure priority (+3 vs +4) differ;
+  `applyRomOverrides()` mutates the shared `Dex.forGen(4)` move objects (the Battle uses the same instance).
+- Sets: abilities MUST be set explicitly (empty ability = no Levitate etc.). Species/moves map by `num` (= ROM id).
+- Protocol → UI: `Translator` keeps the first (exact HP) line of each `|split|` pair, uses ROM message templates
+  (archive 324 triplets; archive 0 for "X used MOVE!"), and reorders crit/effectiveness after the HP drain (crit first).
+- Cynthia's natures come from her ROM PIDs; level override via `BattleConfig.cynthiaLevel` (default 76, null = ROM).
+
+## Daily generator & winnability
+
+Code: `web/src/generator/{generate,daily}.ts`, CLIs `npm run sim -- DATE`, `npm run passrate -- N`, `scripts/tune.ts`.
+- Seed = UTC `YYYYMMDD`; mulberry32. Pool = National Dex 1–493 minus legendaries/mythicals minus anything that evolves.
+- Legal moves = own + pre-evolution level-up (≤ 76), TM/HM union over the chain, base-form egg moves; banned:
+  Sketch, Snore, Sleep Talk, Nightmare, Dream Eater, Fling, Natural Gift, Spit Up, Swallow, Teleport, Splash, Struggle.
+  ≥ 2 damaging moves (Counter/Mirror Coat/Metal Burst/Bide don't count), random legal ability, Hardy, 31 IVs, **85 EVs**.
+- Winnability: greedy 1-ply bot (`bot.ts`) plays `attempts = 4` battles (battle seeds `seed*16+k`); if none is won,
+  reroll with seed `YYYYMMDD*100 + r` (max 20). The player's battle uses battle seed = `YYYYMMDD`.
+- Measured (2026-10-16 + 1000 days, `docs/passrate-1000.txt`): raw pass rate 34.3% → ~2 rerolls/day on average,
+  ~234 ms per seed in Node. Per single battle the bot wins ~18% with 85 EVs (5% with 0 EVs; 73% vs Cynthia's ROM levels).
