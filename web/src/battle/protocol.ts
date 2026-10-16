@@ -23,13 +23,17 @@ const T = {
   crit: 774, notVeryEffective: 779, superEffective: 780, playerDefeated: 785, playerLost: 787,
   rain: 799, rainStop: 803, sandStart: 804, sandRage: 805, sandStop: 806, sunStart: 807, sunStop: 809,
   hailStart: 810, hailStop: 812, trainerSentOut: 974, go: 979, comeBack: 985, trainerUsedItem: 858,
-  sandBuffet: 285, recoil: 279, drained: 82, itemRestoredHp: 1030, restoredUsingItem: 899,
+  sandBuffet: 285, recoil: 279, drained: 82, littleHp: 908, moveRestored: 1030, abilityRestored: 635,
+  exerting: 1238, abilityRaised: 622, noItems: 1135, aquaRing: 1027, foresaw: 472,
+  absorbedLight: 214, burrowed: 226, flew: 223, tightening: 497, hurtConfusion: 797, snappedOut: 153,
+  hitCount: 46, noTarget: 1234, hurtBy: 262, itemRestoredHp: 1030, restoredUsingItem: 899,
 } as const;
 const STAT_INDEX: Record<string, number> = { atk: 1, def: 2, spe: 3, spa: 4, spd: 5, accuracy: 6, evasion: 7 };
 const STATUS_MSG: Record<string, number> = { slp: T.asleep, psn: T.poisoned, tox: T.badlyPoisoned, brn: T.burned, frz: T.frozen, par: T.paralyzed };
 
 export class Translator {
   private names: Record<Side, string> = { p1: '', p2: '' };
+  private intimidator: Side | null = null;
   constructor(private data: GameData, private playerName = 'Player', private trainer = 'Cynthia') {}
 
   private fill(tpl: string, vars: (string | number)[]): string {
@@ -104,15 +108,20 @@ export class Translator {
         const side = this.who(p[2]);
         const { hp, maxhp } = this.hp(p[3]);
         const from = p.find(x => x.startsWith('[from]')) ?? '';
+        if (from.includes('confusion')) out.push({ t: 'msg', text: this.plain(T.hurtConfusion) });
         out.push({ t: 'hp', side, hp, maxhp, hit: cmd === '-damage' && !from ? 'normal' : undefined });
+        const name = this.names[side];
         if (from.includes('psn')) out.push({ t: 'msg', text: this.side(T.hurtPoison, side, this.names[side]) });
         else if (from.includes('brn')) out.push({ t: 'msg', text: this.side(T.hurtBurn, side, this.names[side]) });
         else if (from.includes('Sandstorm') || from.includes('Hail')) out.push({ t: 'msg', text: this.side(T.sandBuffet, side, from.includes('Hail') ? 'Hail' : 'Sandstorm', this.names[side]) });
         else if (from.includes('item: ')) {
           const item = from.split('item: ')[1];
-          if (cmd === '-heal') out.push({ t: 'msg', text: this.side(item.endsWith('Berry') ? T.restoredUsingItem : T.itemRestoredHp, side, this.names[side], item) });
+          if (cmd === '-heal') out.push({ t: 'msg', text: this.side(item === 'Leftovers' ? T.littleHp : T.restoredUsingItem, side, name, item) });
           else out.push({ t: 'msg', text: `${side === 'p2' ? 'The foe’s ' : ''}${this.names[side]} was hurt\nby its ${item}!` });
         } else if (from.includes('Recoil')) out.push({ t: 'msg', text: this.side(T.recoil, side, this.names[side]) });
+        else if (from.includes('Aqua Ring') || from.includes('Ingrain')) out.push({ t: 'msg', text: this.side(T.moveRestored, side, name, from.includes('Ingrain') ? 'Ingrain' : 'Aqua Ring') });
+        else if (from.includes('ability: ') && cmd === '-heal') out.push({ t: 'msg', text: this.side(T.abilityRestored, side, name, from.split('ability: ')[1]) });
+        else if (from.includes('move: ')) out.push({ t: 'msg', text: this.side(T.hurtBy, side, name, from.split('move: ')[1]) });
         else if (from.includes('drain')) out.push({ t: 'msg', text: this.side(T.drained, side === 'p1' ? 'p2' : 'p1', this.names[side === 'p1' ? 'p2' : 'p1']) });
         break;
       }
@@ -145,13 +154,29 @@ export class Translator {
         if (idx >= 0) out.push({ t: 'msg', text: this.side(idx, side, this.names[side]) });
         break;
       }
-      case '-start':
-        if (p[3] === 'confusion') out.push({ t: 'msg', text: this.side(T.becameConfused, this.who(p[2]), this.names[this.who(p[2])]) });
+      case '-start': {
+        const side = this.who(p[2]);
+        const idx = p[3] === 'confusion' ? T.becameConfused : p[3] === 'Embargo' ? T.noItems : p[3] === 'Aqua Ring' ? T.aquaRing
+          : p[3]?.includes('Future Sight') ? T.foresaw : -1;
+        if (idx >= 0) out.push({ t: 'msg', text: this.side(idx, side, this.names[side]) });
         break;
+      }
       case '-boost': case '-unboost': {
         const side = this.who(p[2]);
         const n = Number(p[4]);
         const stat = t.stats[STAT_INDEX[p[3]] ?? 0];
+        if (cmd === '-unboost' && this.intimidator && this.intimidator !== side) {
+          const by = this.intimidator;
+          this.intimidator = null;
+          // 664: yours cuts the foe's; 667: the foe's cuts yours
+          out.push({ t: 'msg', text: this.plain(by === 'p1' ? 664 : 667, this.names[by], 'Intimidate', this.names[side], stat) });
+          break;
+        }
+        const fromAbility = p.find(x => x.startsWith('[from] ability: '));
+        if (cmd === '-boost' && fromAbility) {
+          out.push({ t: 'msg', text: this.side(T.abilityRaised, side, this.names[side], fromAbility.slice(16), stat) });
+          break;
+        }
         const idx = n === 0 ? (cmd === '-boost' ? T.statWontRise : T.statWontFall)
           : cmd === '-boost' ? (n >= 2 ? T.statSharplyRose : T.statRose) : (n >= 2 ? T.statHarshlyFell : T.statFell);
         out.push({ t: 'msg', text: this.side(idx, side, this.names[side], stat) });
@@ -169,6 +194,28 @@ export class Translator {
         if (p.includes('[eat]')) { /* the following -heal carries the message */ }
         break;
       case '-message': out.push({ t: 'msg', text: p[2] }); break;
+      case '-ability': {
+        const side = this.who(p[2]);
+        if (p[3] === 'Pressure') out.push({ t: 'msg', text: this.side(T.exerting, side, this.names[side], 'Pressure') });
+        else if (p[3] === 'Intimidate') this.intimidator = side;
+        else if (p[3] === 'Mold Breaker') out.push({ t: 'msg', text: `${side === 'p2' ? 'The foe’s ' : ''}${this.names[side]}
+breaks the mold!` });
+        break;
+      }
+      case '-prepare': {
+        const side = this.who(p[2]);
+        const idx = p[3] === 'Solar Beam' ? T.absorbedLight : p[3] === 'Dig' ? T.burrowed : p[3] === 'Fly' ? T.flew : -1;
+        if (idx >= 0) out.push({ t: 'msg', text: this.side(idx, side, this.names[side]) });
+        break;
+      }
+      case '-singleturn':
+        if (p[3]?.includes('Focus Punch')) out.push({ t: 'msg', text: this.side(T.tightening, this.who(p[2]), this.names[this.who(p[2])]) });
+        break;
+      case '-end':
+        if (p[3] === 'confusion') out.push({ t: 'msg', text: this.side(T.snappedOut, this.who(p[2]), this.names[this.who(p[2])]) });
+        break;
+      case '-hitcount': out.push({ t: 'msg', text: this.plain(T.hitCount, p[3]) }); break;
+      case '-notarget': out.push({ t: 'msg', text: this.plain(T.noTarget) }); break;
       case 'faint': {
         const side = this.who(p[2]);
         out.push({ t: 'faint', side, text: this.side(T.fainted, side, this.names[side]) });
@@ -193,7 +240,10 @@ function reorderEffectiveness(ev: UIEvent[]): UIEvent[] {
     const isEff = e.t === 'msg' && (e.text.startsWith('It’s super') || e.text.startsWith('It’s not very') || e.text === 'A critical hit!');
     if (isEff) { held.push(e); continue; }
     out.push(e);
-    if (e.t === 'hp' && held.length) { out.push(...held); held = []; }
+    if (e.t === 'hp' && held.length) {
+      held.sort((a, b) => Number((b as { text: string }).text === 'A critical hit!') - Number((a as { text: string }).text === 'A critical hit!'));
+      out.push(...held); held = [];
+    }
   }
   return out.concat(held);
 }

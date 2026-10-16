@@ -59,3 +59,29 @@ describe('protocol translator (ROM text)', () => {
     ]);
   });
 });
+
+describe('protocol translator: abilities, field effects, ordering', () => {
+  it('uses the combined ROM lines for Intimidate, Aqua Ring, Pressure and crit-first ordering', () => {
+    const tr = new Translator(data);
+    tr.translate(['|switch|p1a: Gyarados|Gyarados, L76, M|300/300', '|switch|p2a: Milotic|Milotic, L76, F|100/100']);
+    const ev = tr.translate([
+      '|-ability|p1a: Gyarados|Intimidate|boost',
+      '|-unboost|p2a: Milotic|atk|1',
+      '|-ability|p2a: Milotic|Pressure',
+      '|move|p2a: Milotic|Ice Beam|p1a: Gyarados',
+      '|-resisted|p1a: Gyarados',
+      '|-crit|p1a: Gyarados',
+      '|-damage|p1a: Gyarados|250/300',
+      '|-heal|p2a: Milotic|90/100|[from] Aqua Ring',
+    ]);
+    const texts = ev.filter(e => 'text' in e).map(e => (e as any).text.replace(/[\n\f]/g, ' '));
+    expect(texts).toEqual([
+      'GYARADOS’s Intimidate cuts the foe’s MILOTIC’s Attack!',
+      'The foe’s MILOTIC is exerting its Pressure!',
+      'The foe’s MILOTIC used Ice Beam!',
+      'A critical hit!',
+      'It’s not very effective...',
+      'Aqua Ring restored the foe’s MILOTIC’s HP!',
+    ]);
+  });
+});
