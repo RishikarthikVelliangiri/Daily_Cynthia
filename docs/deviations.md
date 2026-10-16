@@ -12,6 +12,25 @@ to Showdown at runtime (`applyRomOverrides`, test `showdown.test.ts`):
 | Hypnosis | accuracy 70 | 60 (HGSS value) | 70 |
 | Endure | priority +3 | +4 | +3 |
 
+## Damage (verified against the ROM formula)
+`src/battle/romdamage.ts` is an independent transcription of Diamond's damage code (pret `battle_lib.c`:
+`BattleSystem_CalcMoveDamage`, variance, `ApplyTypeChart`) and of its stat formula. `damage.test.ts` compares all 16
+damage rolls, crit and non-crit, against Showdown for thousands of daily-team-vs-Cynthia matchups and for every
+damage-affecting ability forced on either side. Stats matched exactly. These differences were found and are patched
+to the ROM behavior (`applyRomAbilities`, `applyRomTypeOrder` in `showdown.ts`):
+
+| Case | Diamond | Showdown | 
+|---|---|---|
+| 2x and 1/2x type pair that cancels (Water vs. Gastrodon, Ghost vs. Spiritomb, Ground vs. Roserade, ...) | entries applied in ROM table order, flooring each: 2*floor(d/2) when the 1/2x entry comes first | netted to 1x (odd d kept), up to 1 HP more |
+| Sniper | crit multiplier 3 before the random roll | crit 2, then x1.5 at the end |
+| Iron Fist, Rivalry, Dry Skin (fire) | power * n / 100, floored | 4096-based modifier, rounded |
+| Heatproof | halves the move's power | halves the attacker's stat (Gen 5+) |
+| Technician | never boosts Struggle | boosts Struggle |
+| Cynthia's genders | from her PIDs (all female except Lucario) | random |
+
+Not covered by the test: variable-power moves (Gyro Ball, Eruption, Low Kick, ...), weather, screens, stat stages
+and held items. Those use Showdown's Gen 4 code unchanged.
+
 ## Battle mechanics
 - Mechanics come from Pokémon Showdown's Gen 4 simulator, a reimplementation. Its RNG is not the DS RNG, so exact
   damage rolls/crits/accuracy outcomes differ from a real cartridge given the same inputs. Rare edge-case bugs of the

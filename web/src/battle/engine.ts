@@ -2,7 +2,7 @@ import { Battle } from '@pkmn/sim';
 import { CYNTHIA_ID, type GameData } from '../data';
 import { type GenMon, mulberry32 } from '../generator/generate';
 import { type AIState, applyTrainerItem, chooseAction, chooseReplacement, createAIState } from './ai';
-import { applyRomOverrides, cynthiaSets, playerSet } from './showdown';
+import { applyRomOverrides, applyRomTypeOrder, cynthiaSets, playerSet } from './showdown';
 
 export interface BattleConfig {
   /** Cynthia's level; null = her original ROM levels (60-66). Her species/moves/items never change. */
@@ -25,6 +25,7 @@ export class DailyBattle {
     const rng = mulberry32(seed ^ 0x5eed);
     const prngSeed = [0, 0, 0, 0].map(() => Math.floor(rng() * 0x10000)).join(',') as `${number},${string}`;
     this.battle = new Battle({ formatid: 'gen4customgame' as any, seed: prngSeed });
+    applyRomTypeOrder(this.battle, data);
     this.battle.setPlayer('p1', { name: 'Player', team: team.map(playerSet) });
     this.battle.setPlayer('p2', { name: 'Cynthia', team: cynthiaSets(data, cfg.cynthiaLevel) });
     const trainer = data.trainers[CYNTHIA_ID];
