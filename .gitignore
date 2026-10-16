@@ -1,0 +1,20 @@
+# --- Nintendo data: NEVER commit ---
+*.nds
+*.sav
+rom/
+Diamond NDS/
+extracted/
+assets-extracted/
+web/public/extracted/
+**/contact-sheets/
+*.wav
+*.ogg
+
+# --- tooling ---
+node_modules/
+dist/
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+graphify-out/
