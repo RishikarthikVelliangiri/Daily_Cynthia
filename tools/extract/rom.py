@@ -3,6 +3,7 @@ import functools
 import glob
 import os
 
+import ndspy.lz10
 import ndspy.narc
 import ndspy.rom
 
@@ -33,6 +34,17 @@ class Rom:
     @functools.lru_cache(maxsize=None)
     def narc(self, path):
         return ndspy.narc.NARC(self.file(path)).files
+
+    @functools.lru_cache(maxsize=None)
+    def narc_lz(self, path):
+        """NARC members with LZ10 compression (first byte 0x10) transparently removed."""
+        out = []
+        for b in self.narc(path):
+            try:
+                out.append(bytes(ndspy.lz10.decompress(b)) if b[:1] == b"" else bytes(b))
+            except Exception:
+                out.append(bytes(b))
+        return out
 
     @functools.cached_property
     def arm9(self):
