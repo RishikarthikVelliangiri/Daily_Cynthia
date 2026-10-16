@@ -21,6 +21,8 @@ PLAT_PAL_BUILDING = 28   # terrain palettes: 1 + 3*terrain + tod; building tripl
 HP_ENEMY = (124, 123)
 HP_PLAYER = (127, 126)
 HP_PAL = 36
+# data/mmodel/mmodel.narc
+OW_HERO, OW_HEROINE, OW_CHAMPION = 90, 91, 117
 
 
 def _full(pal):
@@ -72,6 +74,18 @@ def extract(rom, g):
         idx, _, _ = gfx.ncgr(arc[i], decrypt=True)
         gfx.save(gfx.to_rgba(idx, gfx.nclr(arc[i + 1])), g, "trainers", name + ".png")
 
+    # Overworld walking sprites (data/mmodel/mmodel.narc NSBTX): 32x32 frames in numeric order;
+    # 1-4 face up, 5-8 down, 9-12 left, 13-16 right (stand, step, stand, step).
+    from PIL import Image
+    mm = rom.narc_lz("data/mmodel/mmodel.narc")
+    for name, i in (("lucas", OW_HERO), ("dawn", OW_HEROINE), ("cynthia", OW_CHAMPION)):
+        tex = gfx.tex0(mm[i])
+        frames = [tex[n] for n in sorted(tex, key=lambda n: int(n.split(".")[-1]))][:16]
+        strip = Image.new("RGBA", (32 * len(frames), 32))
+        for k, f in enumerate(frames):
+            strip.alpha_composite(f, (32 * k, 0))
+        gfx.save(strip, g, "overworld", name + ".png")
+
     # Sprite placement tables (per species): yOffset = hover altitude (signed), height[4] = ground offsets
     # for (female back, male back, female front, male front).
     yofs = np.frombuffer(rom.narc("poketool/pokegra/poke_yofs.narc")[0], np.int8).tolist()
@@ -87,7 +101,6 @@ def extract(rom, g):
     for i, gl in enumerate(glyphs):
         y, x = divmod(i, 32)
         atlas[y * 16:(y + 1) * 16, x * 16:(x + 1) * 16] = lut[gl]
-    from PIL import Image
     gfx.save(Image.fromarray(atlas, "RGBA"), g, "font.png")
     from .text import _ENCODE
     meta["font"] = {"glyphW": 16, "glyphH": 16, "perRow": 32, "firstChar": 1, "widths": widths,

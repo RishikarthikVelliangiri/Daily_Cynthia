@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0e1330" />
+  <title>Daily Champion</title>
+  <meta name="description" content="One battle a day against Champion Cynthia, played with your own Pokémon Diamond data." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&family=Pixelify+Sans:wght@500;700&display=swap" rel="stylesheet" />
+</head>
+<body>
+  <header class="masthead">
+    <h1>Daily Champion</h1>
+    <p class="dateline"><span id="date">—</span> · one scored battle per UTC day</p>
+  </header>
+
+  <main>
+    <div class="console" aria-label="Game console">
+      <div class="lid">
+        <span class="speaker" aria-hidden="true"></span>
+        <div id="ds" class="screens"></div>
+        <span class="speaker" aria-hidden="true"></span>
+      </div>
+      <span class="hinge" aria-hidden="true"><i class="led"></i></span>
+    </div>
+
+    <section id="setup" class="setup" hidden>
+      <h2>Load your own Diamond data</h2>
+      <p>This site ships no Nintendo assets. Extract them from your own copy of <cite>Pokémon Diamond (USA)</cite>, then reload:</p>
+      <pre><code>pip install ndspy pillow numpy
+python -m tools.extract path/to/diamond.nds</code></pre>
+      <p>The extractor writes to <code>extracted/</code>, which the dev server serves locally and Git ignores.</p>
+    </section>
+
+    <aside class="panel">
+      <div class="controls">
+        <button id="mute" type="button" aria-pressed="false">Sound on</button>
+        <button id="readable" type="button">Readable text</button>
+      </div>
+      <dl class="keys">
+        <div><dt>Z · Enter</dt><dd>Confirm (A)</dd></div>
+        <div><dt>X · Esc</dt><dd>Back (B)</dd></div>
+        <div><dt>Arrows</dt><dd>Move cursor</dd></div>
+        <div><dt>Lower screen</dt><dd>Tap or click buttons</dd></div>
+      </dl>
+      <section id="transcript" class="transcript" aria-label="Battle transcript">
+        <h2>Transcript</h2>
+        <div id="transcript-log" aria-live="polite"></div>
+      </section>
+    </aside>
+  </main>
+
+  <div id="toast" class="toast" role="status"></div>
+  <script type="module" src="/src/main.ts"></script>
+</body>
+</html>

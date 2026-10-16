@@ -1,0 +1,22 @@
+{
+  "name": "daily-champion",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "test": "vitest run",
+    "sim": "tsx scripts/sim.ts",
+    "passrate": "tsx scripts/passrate.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "tsx": "^4.23.15",
+    "typescript": "^5.9.3",
+    "vite": "^8.3.4",
+    "vitest": "^5.0.5"
+  },
+  "dependencies": {
+    "@pkmn/sim": "^0.10.11"
+  }
+}

@@ -3,6 +3,20 @@ name: nds-graphics-formats
 description: How to decode NDS graphics/audio formats (NCGR/NCLR/NCER/NANR/NSCR/SDAT) in the Diamond ROM and the converters in tools/extract
 ---
 
+## Graphics (2D + textures)
+
+Code: `tools/extract/gfx.py` (generic decoders) and `tools/extract/gfx_dp.py` (Diamond archive indices). Tests: `tools/tests/test_gfx.py`. Output: `extracted/gfx/` + `extracted/contact-sheets/pokemon-front.png`.
+
+- Nitro container: `u16 header size @0x0C`, `u16 block count @0x0E`; blocks are stored with reversed magic (`TTLP`, `RAHC`, `NRCS`, `KBEC`). `gfx._blocks()` returns block bodies without the 8-byte header.
+- **NCLR** (`TTLP`): `u32 depth, u32 ?, u32 size, u32 offset` then BGR555 colors.
+- **NCGR** (`RAHC`): `u16 h_tiles, u16 w_tiles, u32 depth (3 = 4bpp, 4 = 8bpp), u32 mapping, u32 scanned(bit0), u32 size, u32 offset`; pixel data at block+0x18. 4bpp low nibble first. Tiled = 8x8 tiles row-major; `ncgr_tiles()` returns storage order for 1D OBJ mapping.
+- **DP Pokémon sprite encryption**: XOR u16 words *back-to-front* with LCRNG (`*0x41C64E6D + 0x6073`), seed = last (encrypted) word. Platinum runs front-to-back instead.
+- **NSCR** (`NRCS`): `u16 w, u16 h, u32 mode, u32 size`; entries `tile | hflip<<10 | vflip<<11 | pal<<12`. Screens wider/taller than 256 px are stored in 32x32-tile blocks (left→right, top→bottom) — `nscr()` reassembles them.
+- **NCER** (`KBEC`): `u16 cells, u16 ext flag (1 → 16-byte cell entries), u32 table offset, u32 mapping (low nibble = tile shift)`; OAM attr0/1/2 → shape/size table in `ncer()`; tile index `<< shift`.
+- **Font** (`graphic/font.narc[0]`): see docs/rom-map.md. Each 8-px glyph row is a big-endian u16.
+- **NSBTX/TEX0** (`tex0()`): TEX0 `+0x0E u16 tex dict, +0x14 u32 tex data, +0x34 u32 pal dict, +0x38 u32 pal data`. Dict: `u8 0, u8 n, u16 size, u16 8, u16 treeSize`, entries at `dict + treeSize` (`u16 entrySize, u16 sectionSize`, entries, then 16-byte names). Texture params u16 @+2: width `8<<((p>>4)&7)`, height `8<<((p>>7)&7)`, format `(p>>10)&7` (2 = 2bpp, 3 = 4bpp, 4 = 8bpp), bit 13 color-0 transparent. Palette chosen by `<tex>_pl` name or the first palette.
+- Palette selection that could not be read from code (platform, HP box, message window) was done by elimination: identical palette triples mark indoor terrains; `bgprobe`-style smoothness scoring (mean neighbour colour delta) picks the right backdrop palette reliably.
+
 ## Audio (SDAT)
 
 Code: `tools/extract/audio.py` (`python -m tools.extract --only audio`, ~30 s). Tests: `tools/tests/test_audio.py`.

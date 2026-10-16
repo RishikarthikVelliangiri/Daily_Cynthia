@@ -243,3 +243,46 @@ def font(b):
     px = np.stack([(raw >> s) & 3 for s in (6, 4, 2, 0)], -1).reshape(count, th, tw, 8, 8)
     glyphs = px.transpose(0, 1, 3, 2, 4).reshape(count, th * 8, tw * 8)
     return glyphs, list(b[woff:woff + count])
+
+
+# ---------------------------------------------------------------- NSBTX / TEX0 (3D textures)
+
+def _nitro_dict(b, off):
+    """NNS G3D dictionary -> list of (name, entry_bytes)."""
+    num = b[off + 1]
+    tree_size = struct.unpack_from("<H", b, off + 6)[0]
+    eoff = off + tree_size
+    entry_size = struct.unpack_from("<H", b, eoff)[0]
+    entries = [bytes(b[eoff + 4 + i * entry_size: eoff + 4 + (i + 1) * entry_size]) for i in range(num)]
+    noff = eoff + 4 + num * entry_size
+    names = [bytes(b[noff + i * 16: noff + i * 16 + 16]).rstrip(b"\0").decode("latin1") for i in range(num)]
+    return list(zip(names, entries))
+
+
+def tex0(b):
+    """BTX0/BMD0 file -> {texture_name: RGBA PIL image} using each texture's same-named (or first) palette.
+    TEX0: u16 tex size>>3 @0x0C, u16 tex dict @0x0E, u32 tex data @0x14; u32 pal dict @0x34, u32 pal data @0x38."""
+    hdr = struct.unpack_from("<H", b, 0x0E)[0] if b[:4] in (b"BTX0", b"BMD0") else 0
+    blocks = [struct.unpack_from("<I", b, 0x10 + 4 * i)[0] for i in range(struct.unpack_from("<H", b, 0x0E)[0])]
+    t0 = next(o for o in blocks if b[o:o + 4] == b"TEX0")
+    tex_dict = t0 + struct.unpack_from("<H", b, t0 + 0x0E)[0]
+    tex_data = t0 + struct.unpack_from("<I", b, t0 + 0x14)[0]
+    pal_dict = t0 + struct.unpack_from("<I", b, t0 + 0x34)[0]
+    pal_data = t0 + struct.unpack_from("<I", b, t0 + 0x38)[0]
+    pals = [(n, pal_data + (struct.unpack_from("<H", e, 0)[0] << 3)) for n, e in _nitro_dict(b, pal_dict)]
+    out = {}
+    for name, e in _nitro_dict(b, tex_dict):
+        off, params = struct.unpack_from("<HH", e, 0)
+        w, h, fmt, transparent0 = 8 << ((params >> 4) & 7), 8 << ((params >> 7) & 7), (params >> 10) & 7, (params >> 13) & 1
+        start = tex_data + (off << 3)
+        bpp = {2: 2, 3: 4, 4: 8}.get(fmt)
+        if bpp is None or not pals:
+            continue
+        raw = np.frombuffer(b[start:start + w * h * bpp // 8], np.uint8)
+        idx = np.stack([(raw >> s) & ((1 << bpp) - 1) for s in range(0, 8, bpp)], -1).reshape(h, w)
+        pname = name + "_pl" if any(p == name + "_pl" for p, _ in pals) else pals[0][0]
+        poff = dict(pals)[pname]
+        pal = bgr555(struct.unpack_from("<%dH" % (1 << bpp), b, poff))
+        img = to_rgba(idx, pal) if transparent0 else to_rgba(idx, pal, False)
+        out[name] = img
+    return out

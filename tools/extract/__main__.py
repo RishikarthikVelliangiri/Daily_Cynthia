@@ -11,7 +11,7 @@ OUT = os.path.join(rom.REPO, "extracted")
 
 # Message archives the game uses directly (names are in data JSON).
 TEXT_ARCHIVES = {"battle": 324, "champion_room": 180, "trainer_classes": 560, "types": 565,
-                 "move_descriptions": 587, "battle_ui": 3}
+                 "move_descriptions": 587, "battle_ui": 3, "move_use": 0, "stats": 495}
 CYNTHIA = 267
 
 
