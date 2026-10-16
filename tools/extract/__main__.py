@@ -1,4 +1,4 @@
-"""python -m tools.extract [rom.nds] [--only data|gfx|audio]  -> extracted/ (git-ignored)."""
+"""python -m tools.extract [rom.nds] [--only data|gfx|audio|anim]  -> extracted/ (git-ignored)."""
 import argparse
 import json
 import os
@@ -49,7 +49,7 @@ def extract_data(r):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("rom", nargs="?")
-    ap.add_argument("--only", choices=["data", "gfx", "audio"])
+    ap.add_argument("--only", choices=["data", "gfx", "audio", "anim"])
     a = ap.parse_args()
     r = rom.load(a.rom)
     os.makedirs(OUT, exist_ok=True)
@@ -66,6 +66,9 @@ def main():
         from . import audio
         audio.extract(r, OUT)
         print("audio ok")
+    if a.only in (None, "anim"):
+        from . import anim
+        print("anim ok: %d scripts, %d particle files, %d sound effects" % anim.extract(r, OUT))
 
 
 if __name__ == "__main__":

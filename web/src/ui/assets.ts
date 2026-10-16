@@ -156,12 +156,30 @@ export class Sound {
   }
 
   private async playFile(path: string): Promise<void> {
-    const buf = await this.load(path);
-    if (!buf || !this.ctx) return;
-    const src = this.ctx.createBufferSource();
-    src.buffer = buf;
-    src.connect(this.master!);
-    src.start();
-    await new Promise<void>(r => (src.onended = () => r()));
+    return this.playFilePanned(path, 0);
+  }
+
+  /** Sound effects currently playing (battle animation scripts wait for these). */
+  effectsPlaying = 0;
+
+  /** pan: -1 (left) .. 1 (right), the DS's ±127 effect pan. */
+  async playFilePanned(path: string, pan: number): Promise<void> {
+    if (!this.ctx || this.ctx.state !== 'running') return; // suspended (no user gesture yet): nothing would end
+    this.effectsPlaying++;
+    try {
+      const buf = await this.load(path);
+      if (!buf || !this.ctx) return;
+      const src = this.ctx.createBufferSource();
+      src.buffer = buf;
+      if (pan && this.ctx.createStereoPanner) {
+        const p = this.ctx.createStereoPanner();
+        p.pan.value = pan;
+        src.connect(p).connect(this.master!);
+      } else src.connect(this.master!);
+      src.start();
+      await new Promise<void>(r => (src.onended = () => r()));
+    } finally {
+      this.effectsPlaying--;
+    }
   }
 }

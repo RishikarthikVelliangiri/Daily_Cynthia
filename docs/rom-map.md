@@ -97,6 +97,21 @@ pret's `script.s` documents it exactly. See `.claude/skills/gen4-battle-notes`.
   2bpp, each 8-px row a big-endian u16 (pixel 0 in the top bits); values 1 text, 2 shadow, 3 background. Glyph i = char code i+1.
 - `data/mmodel/mmodel.narc` (BTX0 textures, 32×32 frames): hero 90, heroine 91, champion 117. Frames 1–4 up, 5–8 down, 9–12 left, 13–16 right.
 
+## Move animations (`tools/extract/anim.py` -> `extracted/anim/`)
+- `wazaeffect/we.arc` (501 members, member = move id): battle animation bytecode, u32 words; command table and
+  argument counts identical to Platinum (pret `include/data/scripts/btlanimcmd.h`, `asm/macros/btlanimcmd.inc`);
+  45 CallFunc / 55 SetExtraParams / 78 AddSpriteWithFunc carry a count. All 501 disassemble cleanly.
+- `wazaeffect/effectdata/waza_particle.narc` (485): SPL resources, magic `" APS"` version `"12_1"`; header 0x20, resource
+  header 0x58 + optional scale/color/alpha/tex anims (12/12/8/12), child (20), behaviors (8/8/16/4/8/16); textures 0x20
+  header + data + palette. Only A3I5 (1) and A5I3 (6) textures; repeat/flip mirroring is common.
+- Overlay 8: particle world positions (8 battler types x 12 kinds x persp/ortho VecFx32) right after the particle camera
+  eye (1.4375, 4.8125, -1.0); 8 emitter-axis tables (6x6 VecFx32, order differs from Platinum); the 58-row effect-BG
+  table (NCGR, NCLR, NSCR, NSCR reversed, NSCR contest) into `battle/graphic/batt_bg.narc` (LZ).
+- `wazaeffect/effectclact/{wechar,wepltt,wecell,wecellanm}.narc`: effect OAM sprites (NCGR/NCLR/NCER/NANR).
+  NANR sequences are 16 bytes (u16 frames, start, element, type; u32 mode, frame offset); offsets relative to block data.
+- Particle camera: eye (0,0,4), fovY index 45° passed as the half angle; battle default projection is orthographic
+  (8 world units per screen height, 172 fx32 per pixel).
+
 ## Audio — `data/sound/sound_data.sdat`
 See `.claude/skills/nds-graphics-formats` (Audio section). Cries: bank list position = National Dex number
 (names for 387–493 are development numbers). BGM: `SEQ_BA_CHANP`, `SEQ_WINCHAMP`, `SEQ_EYE_CHAMP`, `SEQ_D_LEAGUE`.

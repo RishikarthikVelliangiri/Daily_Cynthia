@@ -6,6 +6,7 @@ import { dateKey } from './generator/generate';
 import { finishAttempt, loadDay, type Outcome, shareText, startAttempt } from './storage';
 import { type AudioManifest, type GfxMeta, image, RomFont, Sound } from './ui/assets';
 import { BattleScene } from './ui/battle-scene';
+import { AnimPlayer } from './anim/player';
 import { messageScreen, type MenuCtx, optionsScreen, resultScreen, type Settings, titleScreen } from './ui/menus';
 import { DS } from './ui/screen';
 import { walkIn } from './ui/walk-in';
@@ -70,7 +71,16 @@ async function boot() {
   $('readable').addEventListener('click', () => { settings.readable = !settings.readable; saveSettings(settings); });
   document.body.classList.add('powered');
 
+  const anim = await AnimPlayer.load(sound);
   const ctx: MenuCtx = { ds, font, sound, meta };
+  const previewMove = Number(new URLSearchParams(location.search).get('anim'));
+  if (previewMove) {
+    (window as any).__anim = anim; // dev inspection
+    const p = dailyPuzzle(data, new Date());
+    const engine = new DailyBattle(data, p.team, p.battleSeed, DEFAULT_CONFIG);
+    await new BattleScene(ds, font, meta, sound, data, engine, { textSpeed: 'fast', playerName: 'Player', playerSprite: settings.trainer, anim }).preview(previewMove);
+    return;
+  }
   // The date is fixed when the page loads, so a battle that crosses UTC midnight still counts for its own day.
   const today = new Date();
   const date = dateKey(today);
@@ -97,7 +107,7 @@ async function boot() {
       await walkIn(ds, font, sound, data, { playerSprite: settings.trainer, textSpeed: settings.textSpeed, onText: transcript });
       const engine = new DailyBattle(data, puzzle.team, puzzle.battleSeed, DEFAULT_CONFIG);
       const scene = new BattleScene(ds, font, meta, sound, data, engine, {
-        textSpeed: settings.textSpeed, playerName: 'Player', playerSprite: settings.trainer, onText: transcript,
+        textSpeed: settings.textSpeed, playerName: 'Player', playerSprite: settings.trainer, onText: transcript, anim,
       });
       const winner = await scene.run();
       sound.stopBgm();

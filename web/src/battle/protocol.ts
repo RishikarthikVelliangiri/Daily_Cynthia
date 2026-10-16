@@ -6,7 +6,7 @@ export type Side = 'p1' | 'p2';
 export type UIEvent =
   | { t: 'msg'; text: string }
   | { t: 'switch'; side: Side; species: number; name: string; level: number; gender: string; hp: number; maxhp: number; status: string; text: string }
-  | { t: 'move'; side: Side; move: string; text: string }
+  | { t: 'move'; side: Side; move: string; num: number; anim: boolean; text: string }
   | { t: 'hp'; side: Side; hp: number; maxhp: number; hit?: 'normal' | 'super' | 'weak' }
   | { t: 'status'; side: Side; status: string }
   | { t: 'faint'; side: Side; text: string }
@@ -106,8 +106,9 @@ export class Translator {
       case 'move': {
         const side = this.who(p[2]);
         const mv = dex.moves.get(p[3]);
-        out.push({ t: 'move', side, move: mv.id, text: this.fill(t.move_use[mv.num * 3 + (side === 'p2' ? 2 : 0)], [this.names[side]]) });
-        if (p.slice(4).some(x => x === '[still]' || x.startsWith('[miss]'))) { /* animation-only flags */ }
+        // [still]/[miss]/[notarget]: Showdown's "no animation" flags (charging turn, miss, no target).
+        const anim = !p.slice(4).some(x => x === '[still]' || x.startsWith('[miss]') || x === '[notarget]');
+        out.push({ t: 'move', side, move: mv.id, num: mv.num, anim, text: this.fill(t.move_use[mv.num * 3 + (side === 'p2' ? 2 : 0)], [this.names[side]]) });
         break;
       }
       case '-damage': case '-heal': case '-sethp': {

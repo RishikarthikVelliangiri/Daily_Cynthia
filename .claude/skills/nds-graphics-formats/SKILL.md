@@ -45,3 +45,14 @@ ndspy's `SSEQ` gives header (`bankID`, `volume`) and raw event bytes; ndspy name
 - No voice limits/stealing (player channel masks ignored), no priority. Portamento, tie, sweep-with-portamento, variables/random/if not implemented. Mod params speed/type/delay latched at note-on (depth/range follow the track per frame).
 - First pass into the loop body also contains the folded loop-end tails (≈ standard loop-folding artifact).
 - Output 32728 Hz stereo; OGG Vorbis q6 via ffmpeg (falls back to WAV if ffmpeg/libvorbis missing).
+
+## Move animations (SPL particles, scripts, effect BGs/sprites)
+- Extractor: `tools/extract/anim.py` (`--only anim`). Runtime: `web/src/anim/` — `spl.ts` (port of pret `lib/spl`:
+  emission shapes, behaviors, scale/color/alpha/texture anims, children, billboard + directional-billboard quads),
+  `gl.ts` (WebGL; DS texture repeat/flip = REPEAT/MIRRORED_REPEAT, color modulate, polygon alpha), `system.ts`
+  (script VM + emitter callbacks + script functions), `player.ts` (loading, 30 Hz pacing, effect BG/OAM drawing).
+- Fixed-point: fx32/fx16 converted to floats (1.0 = 4096); angles stay u16 indices. The SPL RNG is the exact LCG
+  (state * 0x5eedf715 + 0x1b0cb173).
+- `?anim=<move id>` opens a preview (arrows pick a move, A/B = player/foe uses it); `window.__scene.filmstrip(move,
+  side, every, count)` renders frames deterministically (handy when the browser throttles rAF).
+- Verification: `web/src/anim/system.test.ts` runs all 467 move scripts both ways headlessly (must reach End).
