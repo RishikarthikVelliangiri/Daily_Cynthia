@@ -18,6 +18,7 @@ export class AnimPlayer {
   private bgImages = new Map<string, HTMLImageElement | null>();
   private oam: Record<string, { sheet: string; cells: ({ x: number; w: number; h: number; ox: number; oy: number } | null)[]; anims: [number, number][][] }> = {};
   current: MoveAnimation | null = null;
+  private scratch = document.createElement('canvas');
 
   private constructor(private sound: Sound) {}
 
@@ -26,12 +27,14 @@ export class AnimPlayer {
     try {
       const [scripts, pos, se, bgs, oam] = await Promise.all(['anim/scripts.json', 'anim/positions.json', 'anim/se.json', 'anim/bgs.json', 'anim/oam.json']
         .map(p => fetch(p).then(r => (r.ok ? r.json() : Promise.reject(new Error(p))))));
+      const sub = await fetch('anim/sub.json').then(r => (r.ok ? r.json() : undefined), () => undefined); // older extracts lack it
       const p = new AnimPlayer(sound);
-      p.data = { scripts, world: pos.world as Vec3[][], axis: pos.axis };
+      p.data = { scripts, sub, world: pos.world as Vec3[][], axis: pos.axis };
       p.se = se;
       p.bgs = bgs;
       p.oam = oam;
       for (const k in oam) p.sheet(oam[k].sheet);
+      for (let i = 0; i < 4; i++) p.statImage(i);
       bgs.forEach((e: { n?: string; r?: string }, i: number) => { p.effectImage(i, false); if (e.r) p.effectImage(i, true); }); // preload (~60 small PNGs)
       p.renderer = new ParticleRenderer();
       return p;
@@ -51,8 +54,12 @@ export class AnimPlayer {
     return a;
   }
 
-  /** Creates the animation without running it (the caller steps it at 30 Hz). fx/bg are mutated live. */
-  start(move: number, attacker: Side, fx: Record<Side, MonFx>, bg: BgFx, groundHeight: (s: Side) => number): MoveAnimation | null {
+  /** True when the extract has the common (status / stat / weather) animations. */
+  get hasCommon() { return !!this.data?.sub; }
+
+  /** Creates the animation without running it (the caller steps it at 30 Hz). fx/bg are mutated live.
+   * move: a move id or { sub } (common animation; attacker = the affected battler, target = the other one). */
+  start(move: number | { sub: number }, attacker: Side, fx: Record<Side, MonFx>, bg: BgFx, groundHeight: (s: Side) => number, target?: Side): MoveAnimation | null {
     if (!this.data) return null;
     const anim = new MoveAnimation(this.data, {
       loadParticles: id => this.particles(id),
@@ -63,14 +70,15 @@ export class AnimPlayer {
       playCry: () => { /* the scene already plays cries on send-out; move scripts' cries (Growl, Roar…) are rare */ },
       seActive: () => this.sound.effectsPlaying > 0,
       groundHeight,
-    }, move, attacker, fx, bg);
+      animLength: (key, n) => (this.oam[key]?.anims[n] ?? []).reduce((t, f) => t + Math.max(1, f[1]), 0),
+    }, move, attacker, fx, bg, 0, target);
     this.current = anim;
     return anim;
   }
 
   /** Runs one move animation to completion in real time at 30 Hz (frames are skipped, not slowed, if rendering lags). */
-  play(move: number, attacker: Side, fx: Record<Side, MonFx>, bg: BgFx, groundHeight: (s: Side) => number): Promise<void> {
-    const anim = this.start(move, attacker, fx, bg, groundHeight);
+  play(move: number | { sub: number }, attacker: Side, fx: Record<Side, MonFx>, bg: BgFx, groundHeight: (s: Side) => number, target?: Side): Promise<void> {
+    const anim = this.start(move, attacker, fx, bg, groundHeight, target);
     if (!anim) return Promise.resolve();
     return new Promise(resolve => {
       let t0 = performance.now(), stepped = 0;
@@ -104,19 +112,50 @@ export class AnimPlayer {
     return this.bgImages.get('oam/' + file) ?? null;
   }
 
-  /** Draws the running animation's hardware sprites (above particles, like the DS OBJ layer). */
-  drawSprites(g: CanvasRenderingContext2D) {
-    for (const sp of this.current?.sprites.values() ?? []) {
+  /** Stat-change overlay pattern (bg/stat0..3: up, down, heal, metal). */
+  statImage(n: number): HTMLImageElement | null {
+    const file = `stat${n}.png`;
+    if (!this.bgImages.has(file)) {
+      this.bgImages.set(file, null);
+      image(`anim/bg/${file}`).then(img => this.bgImages.set(file, img), () => {});
+    }
+    return this.bgImages.get(file) ?? null;
+  }
+
+  /** Draws the running animation's hardware sprites whose sprite manager was drawn this frame; `behind` = BG
+   * priority below the battlers (2+), else above the particles like the DS OBJ layer. */
+  drawSprites(g: CanvasRenderingContext2D, behind: boolean) {
+    const anim = this.current;
+    if (!anim) return;
+    const all = [...anim.sprites.values(), ...anim.extra].filter(sp => sp.visible && anim.shown.has(sp.mgr) && (sp.prio >= 2) === behind);
+    all.sort((a, b) => b.order - a.order);
+    for (const sp of all) {
       const res = this.oam[sp.key];
-      if (!sp.visible || !res || sp.alpha <= 0) continue;
+      const a = anim.alpha(sp);
+      if (!res || a <= 0) continue;
       const img = this.sheet(res.sheet);
-      const cell = res.cells[res.anims[sp.anim]?.[0]?.[0] ?? 0];
+      const seq = res.anims[sp.anim] ?? res.anims[0] ?? [];
+      const total = seq.reduce((n, f) => n + Math.max(1, f[1]), 0);
+      let t = total ? sp.t % total : 0, ci = seq[0]?.[0] ?? 0;
+      for (const [c, d] of seq) { if (t < Math.max(1, d)) { ci = c; break; } t -= Math.max(1, d); }
+      const cell = res.cells[ci];
       if (!img || !cell) continue;
       g.save();
-      g.globalAlpha = Math.min(1, sp.alpha);
+      g.globalAlpha = Math.min(1, a);
       g.translate(sp.x, sp.y);
-      g.scale(sp.scaleX, sp.scaleY);
-      g.drawImage(img, cell.x, 0, cell.w, cell.h, cell.ox, cell.oy, cell.w, cell.h);
+      if (sp.rot) g.rotate((sp.rot / 65536) * Math.PI * 2);
+      g.scale(sp.hflip ? -sp.scaleX : sp.scaleX, sp.scaleY);
+      if (sp.fadeAmt > 0) { // palette blend toward a color over the cell's opaque pixels
+        const c = this.scratch, sg = c.getContext('2d')!;
+        c.width = cell.w; c.height = cell.h;
+        sg.drawImage(img, cell.x, 0, cell.w, cell.h, 0, 0, cell.w, cell.h);
+        sg.globalCompositeOperation = 'source-atop';
+        sg.globalAlpha = Math.min(1, sp.fadeAmt / 16);
+        const ch = (k: number) => Math.round((((sp.fadeColor >> k) & 31) * 255) / 31);
+        sg.fillStyle = `rgb(${ch(0)},${ch(5)},${ch(10)})`;
+        sg.fillRect(0, 0, cell.w, cell.h);
+        g.drawImage(c, cell.ox, cell.oy);
+      } else g.drawImage(img, cell.x, 0, cell.w, cell.h, cell.ox, cell.oy, cell.w, cell.h);
       g.restore();
     }
   }

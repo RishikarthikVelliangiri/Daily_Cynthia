@@ -13,9 +13,11 @@ export const W = 256, H = 192;
 export class DS {
   readonly top: CanvasRenderingContext2D;
   readonly bottom: CanvasRenderingContext2D;
-  private queue: Input[] = [];
   private waiters: ((i: Input) => void)[] = [];
   private gesture: (() => void)[] = [];
+  private blockedUntil = 0;
+  /** performance.now() of the last A/B/tap, delivered or not (text printers use it to hurry a page). */
+  lastPress = -Infinity;
 
   constructor(readonly root: HTMLElement) {
     const mk = (id: string, label: string) => {
@@ -37,6 +39,7 @@ export class DS {
       const k = KEYMAP[e.key];
       if (!k || (e.target as HTMLElement)?.closest?.('button, input, a, dialog')) return;
       e.preventDefault();
+      if (e.repeat && (k === 'a' || k === 'b')) return; // like JOY_NEW: holding A doesn't press again; arrows repeat
       this.push({ key: k });
     });
     this.bottom.canvas.addEventListener('pointerdown', e => {
@@ -60,17 +63,20 @@ export class DS {
 
   onGesture(f: () => void) { this.gesture.push(f); }
 
+  /** Presses are never buffered (the DS samples buttons each frame): one nobody is waiting for is dropped,
+   * so spamming A during text can't skip later messages or pick a menu entry ahead of time. */
   private push(i: Input) {
     for (const g of this.gesture) g();
-    const w = this.waiters.shift();
-    if (w) w(i); else this.queue.push(i);
+    const now = performance.now();
+    if ('tap' in i || i.key === 'a' || i.key === 'b') this.lastPress = now;
+    if (now < this.blockedUntil) return;
+    this.waiters.shift()?.(i);
   }
 
-  clearInput() { this.queue = []; }
+  /** Ignore all input for `ms` (screen transitions: a double click must not also hit the next screen). */
+  block(ms: number) { this.blockedUntil = Math.max(this.blockedUntil, performance.now() + ms); }
 
   next(): Promise<Input> {
-    const q = this.queue.shift();
-    if (q) return Promise.resolve(q);
     return new Promise(r => this.waiters.push(r));
   }
 
@@ -80,8 +86,7 @@ export class DS {
       let done = false;
       const t = setTimeout(() => { if (!done) { done = true; this.waiters = this.waiters.filter(w => w !== f); res(null); } }, ms);
       const f = (i: Input) => { if (!done) { done = true; clearTimeout(t); res(i); } };
-      const q = this.queue.shift();
-      if (q) f(q); else this.waiters.push(f);
+      this.waiters.push(f);
     });
   }
 }

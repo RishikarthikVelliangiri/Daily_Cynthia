@@ -2,11 +2,12 @@
 // Command semantics follow pret pokeplatinum src/battle_anim/battle_anim_system.c; Diamond's scripts use the same
 // command set (all 501 scripts disassemble with it). Single battles only.
 import { type Emitter, seedSpl, SplManager, type SplFile, type Quad, type Vec3, sinIdx, cosIdx } from './spl';
+import { blendAlpha, DEFAULT_POS, type Side } from './helpers';
+import { MORE_FUNCS, SPRITE_FUNCS } from './funcs';
 
-export type Side = 'p1' | 'p2';
-const other = (s: Side): Side => (s === 'p1' ? 'p2' : 'p1');
+export { DEFAULT_POS, type Side };
+export const other = (s: Side): Side => (s === 'p1' ? 'p2' : 'p1');
 const TYPE: Record<Side, number> = { p1: 0, p2: 1 }; // BATTLER_TYPE_SOLO_PLAYER / SOLO_ENEMY
-export const DEFAULT_POS: Record<Side, [number, number]> = { p1: [64, 112], p2: [192, 48] }; // BATTLER_POS_SOLO_*
 
 /** Per-battler sprite state the scene applies while drawing (PokemonSprite attributes). */
 export interface MonFx {
@@ -15,6 +16,16 @@ export interface MonFx {
   fadeColor: number; fadeAmt: number; // GX RGB555 color, 0..16 blend toward it
   /** Per-screen-row x offsets (Extrasensory's scanline distortion), keyed by screen y. */
   rowShift?: Map<number, number> | null;
+  /** PokemonSprite_StartFade running (PokemonSprite_IsFadeActive). */
+  fading?: boolean;
+  /** MON_SPRITE_PARTIAL_DRAW: only this part of the 80x80 frame is drawn (null = all). */
+  partial?: { x: number; y: number; w: number; h: number } | null;
+  /** MON_SPRITE_MOSAIC (Transform): pixel block size, 0 = off. */
+  mosaic?: number;
+  /** Stat-change overlay: bg/stat{img}.png scrolled over the silhouette, blended at `mix` (0..1). */
+  stat?: { img: number; x: number; y: number; mix: number } | null;
+  /** MON_SPRITE_ALPHA 0..31 (undefined = opaque). */
+  alpha?: number;
 }
 export interface BgFx {
   x: number; y: number; fadeColor: number; fadeAmt: number; grayscale: boolean;
@@ -22,20 +33,42 @@ export interface BgFx {
   effect?: EffectBg | null;
   /** ScrollCustomBg / MuddyWater: a translucent move BG scrolled over the Pokémon and particles. */
   overlay?: EffectBg | null;
+  /** LoadPokemonSpriteIntoBg copy on the base BG (Acid Armor, Spite): per-scanline BG offsets in DS screen space
+   * (row r shows copy row r + oy[r], drawn at x = -ox[r]), blended at `mix`, darkened toward black by `dark`. */
+  monBg?: { side: Side; ox: number[]; oy: number[]; mix: number; dark: number } | null;
 }
 export interface EffectBg {
   bg: number; reversed: boolean;
   mix: number; // 0..1 weight of the effect BG against the battle BG (DS alpha blend, clamped to 16)
   fadeColor: number; fadeAmt: number; // effect palette fade 0..16
   x: number; y: number; // scroll offset
+  /** Per-scanline x scroll (HDMA: wave / ScrollSwitchedBg), replacing x for those rows (y scroll is 0 there). */
+  rowX?: number[] | null;
+  /** Window 0 (Fake Out): the effect BG shows only between these screen x (inclusive). */
+  clip?: [number, number] | null;
 }
-/** OAM copies of battlers (AddPokemonSprite): drawn over the battler when visible. */
-export interface MonCopy { side: Side; x: number; y: number; visible: boolean; alpha: number; scaleX: number; scaleY: number }
+/** Attributes shared by OAM sprites (ManagedSprite): center position, affine scale (1 = 100%) and rotation,
+ * draw flag, XLU = blended by the global alpha registers, prio = BG priority (2+ draws behind the battlers),
+ * order = sprite priority (lower is in front), palette fade toward a GX color. */
+export interface ObjAttrs {
+  x: number; y: number; scaleX: number; scaleY: number; rot: number; visible: boolean;
+  xlu: boolean; alpha: number; prio: number; order: number; fadeColor: number; fadeAmt: number; hflip?: boolean;
+}
+/** OAM copies of battlers (pokemon sprite manager); tint = TintPalette gray tone (r, g, b out of 256). */
+export interface MonCopy extends ObjAttrs { side: Side; tint: [number, number, number] | null; mosaic?: number }
+/** A hardware sprite from wazaeffect/effectclact; key = "char_pltt_cell_anim" in anim/oam.json, t = anim frame timer. */
+export interface OamSprite extends ObjAttrs { key: string; anim: number; t: number; mgr: number }
+/** Sprite manager id of the pokemon sprite (copy) manager in `shown`. */
+export const MON_MGR = -1;
+const obj = (x: number, y: number): ObjAttrs => ({ x, y, scaleX: 1, scaleY: 1, rot: 0, visible: true, xlu: false, alpha: 1, prio: 1, order: 100, fadeColor: 0, fadeAmt: 0 });
 
-/** A hardware sprite from wazaeffect/effectclact (OAM); key = "char_pltt_cell_anim" resources in anim/oam.json. */
-export interface OamSprite { key: string; anim: number; x: number; y: number; scaleX: number; scaleY: number; alpha: number; visible: boolean; mgr: number }
-
-export interface AnimData { scripts: number[][]; world: Vec3[][]; axis: { playerToEnemy: Vec3; enemyToPlayer: Vec3 }[] }
+export interface AnimData { scripts: number[][]; sub?: number[][]; world: Vec3[][]; axis: { playerToEnemy: Vec3; enemyToPlayer: Vec3 }[] }
+/** Common animations (wazaeffect/we_sub.narc, order of pret anim_subscripts.order). */
+export const SUB = {
+  sleep: 1, poison: 2, burn: 3, freeze: 4, paralysis: 5, confusion: 6, infatuation: 7, heldItem: 10, statUp: 12, statDown: 13,
+  heal: 14, rain: 19, hail: 20, sandstorm: 21, sun: 22, curse: 30, nightmare: 31, leechSeed: 32, bind: 33, wrap: 34,
+  fireSpin: 35, magmaStorm: 36, clamp: 37, whirlpool: 38, sandTomb: 39, ingrain: 40,
+} as const;
 export interface ParticleAsset { file: SplFile; sheet: HTMLImageElement }
 
 export interface AnimHost {
@@ -45,6 +78,8 @@ export interface AnimHost {
   seActive(): boolean;
   /** MON_SPRITE_SHADOW_HEIGHT-like offset used to anchor scaling to the ground. */
   groundHeight(side: Side): number;
+  /** Frames one pass of an effect sprite's cell animation takes (Sprite_IsAnimated for one-shot anims). */
+  animLength?(key: string, anim: number): number;
 }
 
 export interface ActiveSystem { mgr: SplManager; asset: ParticleAsset }
@@ -81,21 +116,51 @@ export class MoveAnimation {
   private pending: Promise<void> | null = null;
   readonly copies = new Map<number, MonCopy>();
   readonly sprites = new Map<number, OamSprite>();
-  private spriteRes: Record<number, Record<string, number>> = {};
+  /** Sprites made by sprite functions (AddSpriteWithFunc) and their extra copies. */
+  readonly extra = new Set<OamSprite>();
+  /** Global alpha blend registers (G2_SetBlendAlpha EVA/EVB) used by XLU sprites. */
+  blendA = 16; blendB = 0;
+  /** Sprite managers drawn (SpriteSystem_DrawSprites) during the last finished frame; MON_MGR = pokemon sprites. */
+  shown = new Set<number>();
+  private drawing = new Set<number>();
+  private monDrawTask = false;
+  lastTemplate: number[] = [];
+  /** Move power (Magnitude's shake strength). */
+  power = 0;
   done = false;
   frame = 0;
   get loading() { return this.pending !== null; }
   /** Why the script stopped early (unknown opcode / timeout); empty when it reached End. */
   aborted = '';
 
-  constructor(private data: AnimData, private host: AnimHost, readonly move: number, readonly attacker: Side,
-    readonly fx: Record<Side, MonFx>, readonly bg: BgFx, private effectChance = 0) {
-    this.w = data.scripts[move] ?? [];
-    seedSpl((move * 2654435761) >>> 0);
+  /** move: a move id, or { sub } for a common animation (status, stat change, weather...). */
+  constructor(private data: AnimData, readonly host: AnimHost, readonly move: number | { sub: number }, readonly attacker: Side,
+    readonly fx: Record<Side, MonFx>, readonly bg: BgFx, private effectChance = 0, target?: Side) {
+    this.w = (typeof move === 'number' ? data.scripts[move] : data.sub?.[move.sub]) ?? [];
+    this.target = target ?? other(attacker);
+    seedSpl(((typeof move === 'number' ? move : 1000 + move.sub) * 2654435761) >>> 0);
     if (!this.w.length) this.done = true;
   }
 
-  get defender(): Side { return other(this.attacker); }
+  private target: Side;
+  get defender(): Side { return this.target; }
+  alpha(o: ObjAttrs) { return o.xlu ? blendAlpha(this.blendA, this.blendB) : o.alpha; }
+  /** SpriteSystem_DrawSprites(manager) for this frame. */
+  drawMgr(mgr: number) { this.drawing.add(mgr); }
+  /** A new effect sprite from a template (char, pltt, cell, anim members), at the defender like AddSprite. */
+  newSprite(mgr: number, t = this.lastTemplate): OamSprite {
+    const [x, y] = DEFAULT_POS[this.defender];
+    const sp: OamSprite = { ...obj(x, y), key: `${t[0]}_${t[1]}_${t[2]}_${t[3]}`, anim: 0, t: 0, mgr };
+    this.extra.add(sp);
+    return sp;
+  }
+  /** A pokemon sprite copy of a battler (AddPokemonSprite) at its position; hidden if the battler is. */
+  newCopy(side: Side): MonCopy {
+    const f = this.fx[side];
+    return { ...obj(f.x, f.y), side, tint: null, visible: !f.hide };
+  }
+  /** Script variables of the current CallFunc / AddSpriteWithFunc. */
+  get scriptVars() { return this.vars; }
   private side(role: number): Side | null {
     // BATTLER_ROLE_*: attacker, defender, (partners), player 1, enemy 1, (player 2, enemy 2)
     return role === 0 ? this.attacker : role === 1 ? this.defender : role === 4 ? 'p1' : role === 5 ? 'p2' : null;
@@ -112,15 +177,19 @@ export class MoveAnimation {
   step(): void {
     if (this.done || this.pending) return; // particle resource still loading (the DS waits 2 frames for VRAM upload)
     this.frame++;
+    this.drawing = new Set();
     if (this.waiting) {
       if (this.delay === 0) this.waiting = false; else this.delay--;
     } else {
       let guard = 0;
       do { this.exec(); } while (this.delay === 0 && !this.done && !this.waiting && !this.pending && ++guard < 2000);
     }
+    this.sysTasks = this.sysTasks.filter(t => t());
     this.tasks = this.tasks.filter(t => t());
     this.soundTasks = this.soundTasks.filter(t => t());
     this.bgTasks = this.bgTasks.filter(t => t());
+    if (this.monDrawTask) this.drawing.add(MON_MGR);
+    this.shown = this.drawing;
     const eff = this.bg.effect;
     if (eff && this.bgMove?.on) { eff.x += this.bgMove.stepX; eff.y += this.bgMove.stepY; }
     for (const s of this.systems) s?.mgr.update();
@@ -135,10 +204,11 @@ export class MoveAnimation {
   }
 
   private finish() {
-    this.bg.effect = null; this.bg.overlay = null; this.bgTasks = []; this.sprites.clear();
+    this.bg.effect = null; this.bg.overlay = null; this.bg.monBg = null; this.bgTasks = []; this.sprites.clear(); this.extra.clear(); this.copies.clear();
+    this.shown = new Set();
     this.done = true;
     for (let i = 0; i < 4; i++) this.systems[i] = null;
-    this.tasks = []; this.soundTasks = [];
+    this.tasks = []; this.soundTasks = []; this.sysTasks = [];
   }
 
   private rd() { return this.w[this.pc++] ?? 4; }
@@ -207,7 +277,11 @@ export class MoveAnimation {
         const a = this.rd();
         if (op === 53) this.systems[a] = null; // UnloadParticleSystem
         if (op === 60) this.copies.delete(a); // RemovePokemonSprite
-        if (op === 80) for (const [k, sp] of this.sprites) if (sp.mgr === a) this.sprites.delete(k); // FreeSpriteManager
+        if (op === 80) { // FreeSpriteManager
+          for (const [k, sp] of this.sprites) if (sp.mgr === a) this.sprites.delete(k);
+          for (const sp of this.extra) if (sp.mgr === a) this.extra.delete(sp);
+        }
+        if (op === 83) this.monDrawTask = false; // StopPokemonSpriteDrawTask
         break;
       }
       case 22: { const seq = this.rd(), pan = this.rd(); this.host.playSe(seq, this.pan(pan)); break; }
@@ -263,7 +337,7 @@ export class MoveAnimation {
       case 58: { // AddPokemonSprite role, track, spriteID, resID
         const role = this.rd(); this.rd(); const id = this.rd(); this.rd();
         const s = this.side(role);
-        if (s) this.copies.set(id, { side: s, x: this.fx[s].x, y: this.fx[s].y, visible: false, alpha: 1, scaleX: 1, scaleY: 1 });
+        if (s) this.copies.set(id, this.newCopy(s));
         break;
       }
       case 62: { const ps = this.rd(), proj = this.rd(); this.projections[ps] = proj; break; } // SetCameraProjection
@@ -281,18 +355,37 @@ export class MoveAnimation {
         const at = this.pc; this.pc = at + this.w[at];
         break;
       }
-      case 73: { const m = this.rd(); this.pc += 7; this.spriteRes[m] = {}; break; } // InitSpriteManager
-      case 74: case 76: case 77: { const m = this.rd(), idx = this.rd(); (this.spriteRes[m] ??= {})[op === 74 ? 'c' : op === 76 ? 'cl' : 'an'] = idx; break; }
-      case 75: { const m = this.rd(), idx = this.rd(); this.rd(); (this.spriteRes[m] ??= {}).p = idx; break; }
-      case 82: this.pc += 3; break;
-      case 78: { this.pc += 8; const n = this.rd(); this.pc += n; break; } // AddSpriteWithFunc: per-sprite effect functions not reproduced
-      case 79: { // AddSprite manager, spriteID, resources… : placed on the defender
-        const m = this.rd(), id = this.rd(); this.pc += 6;
-        const r = this.spriteRes[m] ?? {};
-        const [x, y] = DEFAULT_POS[this.defender];
-        this.sprites.set(id, { key: `${r.c}_${r.p}_${r.cl}_${r.an}`, anim: 0, x, y, scaleX: 1, scaleY: 1, alpha: 1, visible: false, mgr: m });
+      case 73: this.pc += 8; break; // InitSpriteManager
+      case 74: case 76: case 77: this.pc += 2; break; // Load{Char,Cell,Anim}ResObj (resources are keyed by the sprite template)
+      case 75: this.pc += 3; break; // LoadPlttRes
+      case 82: { // StartPokemonSpriteDrawTask role, slot, spriteID: singles hide that copy and keep drawing the manager
+        this.rd(); this.rd(); const c = this.copies.get(this.rd());
+        if (c) c.visible = false;
+        this.monDrawTask = true;
         break;
-      }      case 81: { const id = this.rd(), vis = this.rd(); const c = this.copies.get(id); if (c) c.visible = !!vis; break; }
+      }
+      case 78: { // AddSpriteWithFunc manager, funcID, template[6], argc, args...
+        const m = this.rd(), fn = this.rd();
+        this.lastTemplate = this.w.slice(this.pc, this.pc + 6); this.pc += 6;
+        const n = this.rd();
+        const v = new Array<number>(10).fill(0);
+        for (let i = 0; i < n; i++) v[i] = this.w[this.pc + i] | 0;
+        this.pc += n;
+        this.vars = v;
+        const sp = this.newSprite(m);
+        const f = SPRITE_FUNCS[fn];
+        if (f) f.call(this, sp, v); else this.extra.delete(sp);
+        break;
+      }
+      case 79: { // AddSprite manager, spriteID, template[6]: placed on the defender, drawn when its manager is
+        const m = this.rd(), id = this.rd();
+        this.lastTemplate = this.w.slice(this.pc, this.pc + 6); this.pc += 6;
+        const sp = this.newSprite(m);
+        this.extra.delete(sp);
+        this.sprites.set(id, sp);
+        break;
+      }
+      case 81: { const id = this.rd(), vis = this.rd(); const c = this.copies.get(id); if (c) c.visible = !!vis; break; }
       default: this.aborted = `opcode ${op} at ${this.pc - 1}`; this.finish();
     }
   }
@@ -329,6 +422,17 @@ export class MoveAnimation {
         if (this.bg.effect) { this.bg.effect.x = vars[2] * rev; this.bg.effect.y = vars[3] * rev; }
       }
       if (flags & 0x08 && this.bgMove) this.bgMove.on = false;
+      if (flags & 0x20 && this.bg.effect) { // AnimStartWave: 16 strips of 8 rows slide at 32,28..4,4..32 px/frame
+        const eff = this.bg.effect, rev = this.bgReversed(vars[6]) ? -1 : 1;
+        const speeds = [32, 28, 24, 20, 16, 12, 8, 4, 4, 8, 12, 16, 20, 24, 28, 32].map(s => s * rev), acc = new Array(16).fill(0);
+        this.sysTask(() => {
+          if (this.bg.effect !== eff) return false; // restored (CancelBgAnim)
+          const rows = new Array<number>(192).fill(0);
+          for (let i = 0; i < 16; i++) { acc[i] = (((acc[i] + speeds[i]) << 16) >> 16); for (let r = i * 8; r < i * 8 + 8; r++) rows[r] = acc[i]; }
+          eff.rowX = rows;
+          return true;
+        });
+      }
     };
     const mixOf = (eff: number, base: number) => { const e = Math.min(16, eff), bb = Math.min(16, base); return e + bb ? e / (e + bb) : 0; };
     const newEffect = (): EffectBg => ({ bg: bgId, reversed: this.bgReversed(vars[7]), mix: 0, fadeColor, fadeAmt: 0, x: 0, y: 0 });
@@ -558,6 +662,9 @@ export class MoveAnimation {
     return out;
   }
   task(t: Task, runNow = false) { if (!runNow || t()) this.tasks.push(t); }
+  /** A task the script doesn't wait for (SysTask_Start outside the anim task list: fades, alpha lerps). */
+  sysTask(t: Task) { this.sysTasks.push(t); }
+  private sysTasks: Task[] = [];
 
   private callFunc() {
     const id = this.rd(), n = this.rd();
@@ -565,7 +672,7 @@ export class MoveAnimation {
     for (let i = 0; i < n; i++) v[i] = this.w[this.pc + i] | 0;
     this.pc += n;
     this.vars = v;
-    const fn = FUNCS[id];
+    const fn = FUNCS[id] ?? MORE_FUNCS[id];
     if (fn) fn.call(this, v);
   }
 
@@ -808,6 +915,7 @@ const FUNCS: Record<number, Fn> = {
     };
     lx.update(); apply();
     this.task(() => {
+      this.drawMgr(sp.mgr);
       switch (state) {
         case 0: lx = MoveAnimation.lerp(256, 153, 12, 384, 12); state = 1; break;
         case 1:
@@ -851,48 +959,6 @@ const FUNCS: Record<number, Fn> = {
       if (flashFor > 0 && --flashFor === 0) this.bg.fadeAmt = 0;
       sides.forEach((s, i) => (this.fx[s].x = base[i] + sh.s.x));
       this.bg.x = sh.s.x;
-      return true;
-    });
-  },
-  // 11 Confusion: translucent copy of the defender stretches to 120%x150% and back while the defender jitters
-  11() {
-    const d = this.defender, fx = this.fx[d], bx = fx.x, by = fx.y;
-    const sh = MoveAnimation.shaker(2, 0, 1, 6);
-    const copy: MonCopy = { side: d, x: bx, y: by, visible: true, alpha: 1, scaleX: 1, scaleY: 1 };
-    this.copies.set(100, copy);
-    let lx = MoveAnimation.lerp(256, Math.trunc((12 * 256) / 10), 256, Math.trunc((15 * 256) / 10), 7), state = 0, jitter = 1;
-    this.task(() => {
-      sh.update();
-      const more = lx.update();
-      fx.x = bx + sh.s.x; copy.x = fx.x;
-      copy.scaleX = lx.s.x / 256 + jitter * 0.1; copy.scaleY = lx.s.y / 256; jitter = -jitter;
-      if (!more) {
-        if (state === 0) { lx = MoveAnimation.lerp(lx.s.x, 256, lx.s.y, 256, 4); state = 1; }
-        else { fx.x = bx; fx.y = by; this.copies.delete(100); return false; }
-      }
-      return true;
-    });
-  },
-  // 35 ScalePokemonSprite(role, spriteAlpha, start, end, ref, cycles, frames<<16|restore, spriteID)
-  35(v) {
-    const c = this.copies.get(v[7]);
-    if (!c) return;
-    c.visible = true; c.alpha = Math.min(16, v[1]) / 16;
-    const rel = (x: number) => x / (v[4] || 1);
-    let cycles = v[5], state = 0, t = 0;
-    const scaleN = v[6] >>> 16, restoreN = v[6] & 0xffff;
-    this.task(() => {
-      const n = state === 0 ? scaleN : restoreN;
-      const [from, to] = state === 0 ? [v[2], v[3]] : [v[3], v[2]];
-      t++;
-      const k = n ? Math.min(1, t / n) : 1;
-      c.scaleX = c.scaleY = rel(from + (to - from) * k);
-      if (k >= 1) {
-        t = 0;
-        if (state === 0) state = 1;
-        else if (--cycles <= 0) return false;
-        else state = 0;
-      }
       return true;
     });
   },
@@ -994,3 +1060,9 @@ function moveEmitter(this: MoveAnimation, v: number[], parabolic: boolean) {
     return true;
   });
 }
+
+/** Function ids with a port (coverage checks). */
+export const implementedFuncs = () => ({
+  funcs: new Set([...Object.keys(FUNCS), ...Object.keys(MORE_FUNCS)].map(Number)),
+  sprites: new Set(Object.keys(SPRITE_FUNCS).map(Number)),
+});

@@ -107,6 +107,15 @@ pret's `script.s` documents it exactly. See `.claude/skills/gen4-battle-notes`.
 - Overlay 8: particle world positions (8 battler types x 12 kinds x persp/ortho VecFx32) right after the particle camera
   eye (1.4375, 4.8125, -1.0); 8 emitter-axis tables (6x6 VecFx32, order differs from Platinum); the 58-row effect-BG
   table (NCGR, NCLR, NSCR, NSCR reversed, NSCR contest) into `battle/graphic/batt_bg.narc` (LZ).
+- `wazaeffect/we_sub.narc` (50 members): common animations in the same bytecode, member order = pret
+  `res/battle/scripts/common_anims/anim_subscripts.order` (1 sleep, 2 poison, 3 burn, 4 freeze, 5 paralysis,
+  6 confusion, 10 held item, 12 stat up, 13 stat down, 14 restore HP, 19-22 rain/hail/sandstorm/sun, 30-40 damage
+  curse/nightmare/leech seed/bind/wrap/fire spin/magma storm/clamp/whirlpool/sand tomb/ingrain). Script function ids
+  match Platinum's table (80-83 = StatChangeUp/Down/Heal/Metal).
+- Stat-change overlays: overlay 8 table of 4 x (NCGR, NCLR, NSCR, NSCR) into `batt_bg.narc`, first row (48, 207, 49, 49):
+  up, down, heal, metal patterns (512x512, content in the left 256 columns) -> `extracted/anim/bg/stat{0..3}.png`.
+- Sprite templates (AddSprite / AddSpriteWithFunc) name their wechar/wepltt/wecell/wecellanm members directly
+  (resource id = member + 5000), so effect sprites are keyed by the template, not by the last Load* command.
 - `wazaeffect/effectclact/{wechar,wepltt,wecell,wecellanm}.narc`: effect OAM sprites (NCGR/NCLR/NCER/NANR).
   NANR sequences are 16 bytes (u16 frames, start, element, type; u32 mode, frame offset); offsets relative to block data.
 - Particle camera: eye (0,0,4), fovY index 45° passed as the half angle; battle default projection is orthographic

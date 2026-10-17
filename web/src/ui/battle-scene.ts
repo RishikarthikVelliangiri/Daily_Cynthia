@@ -4,10 +4,11 @@ import type { DailyBattle } from '../battle/engine';
 import { fillTemplate, Translator, type Side, type UIEvent } from '../battle/protocol';
 import { dex } from '../battle/showdown';
 import type { AnimPlayer } from '../anim/player';
-import { type BgFx, DEFAULT_POS, freshFx, type MonFx } from '../anim/system';
+import { type BgFx, DEFAULT_POS, freshFx, MON_MGR, type MonFx } from '../anim/system';
 import { type GfxMeta, image, pokemonSprite, type RomFont, type Sound, STYLE_DARK, STYLE_LIGHT } from './assets';
 import { type DS, H, sleep, W } from './screen';
 import { button, hit } from './widgets';
+import { MENU_GUARD_MS } from './menus';
 
 // Layout (DS pixels, top screen). Platform centers follow pret's battle_display.c (enemy 192,88; player 64,136).
 const ENEMY = { x: 192, y: 88, foot: 92 };
@@ -98,25 +99,27 @@ export class BattleScene {
     this.trainer.cynthia.visible = false; this.trainer.player.visible = false;
     for (const e of this.tr.translate(this.engine.takeLog())) if (e.t === 'switch') await this.showSwitch({ ...e, text: '' });
     (window as any).__scene = this; // dev inspection
-    let move = start;
+    let move = start; // past 467: the common animations (status, stat change, weather...) 1..40
     for (;;) {
-      const name = this.data.moves[move]?.name ?? '?';
+      const name = move > 467 ? `common ${move - 467}` : this.data.moves[move]?.name ?? '?';
       this.text = [`#${move} ${name}`, 'A: you use it  B: foe uses it'];
+      this.ds.block(150);
       const i = await this.ds.next();
       if ('tap' in i) continue;
       const d = { left: -1, right: 1, up: 10, down: -10 }[i.key as string];
-      if (d) { move = Math.min(467, Math.max(1, move + d)); continue; }
-      await this.playMoveAnim(move, i.key === 'a' ? 'p1' : 'p2');
+      if (d) { move = Math.min(507, Math.max(1, move + d)); continue; }
+      await this.playMoveAnim(move > 467 ? { sub: move - 467 } : move, i.key === 'a' ? 'p1' : 'p2');
     }
   }
 
   /** Dev tool: steps a move animation frame by frame and returns a film strip (every Nth frame) of the top screen. */
-  async filmstrip(move: number, side: Side, every = 6, count = 24): Promise<HTMLCanvasElement> {
+  async filmstrip(move: number | { sub: number }, side: Side, every = 6, count = 24): Promise<HTMLCanvasElement> {
     const strip = document.createElement('canvas');
     strip.width = 256 * 4; strip.height = 192 * Math.ceil(count / 4);
     const sg = strip.getContext('2d')!;
     this.fx = { p1: freshFx('p1'), p2: freshFx('p2') };
-    const anim = this.opts.anim!.start(move, side, this.fx, this.bgFx, () => 0)!;
+    const height = (s: Side) => { const v = this.views[s]; return v ? this.monBox(s, v).h : 0; };
+    const anim = this.opts.anim!.start(move, side, this.fx, this.bgFx, height)!;
     for (let f = 0, shot = 0; shot < count && !anim.done; f++) {
       anim.step();
       for (let k = 0; k < 4; k++) await Promise.resolve(); // particle loads
@@ -125,7 +128,7 @@ export class BattleScene {
     }
     this.opts.anim!.current = null;
     this.fx = { p1: freshFx('p1'), p2: freshFx('p2') };
-    Object.assign(this.bgFx, { x: 0, y: 0, fadeAmt: 0, grayscale: false, effect: null, overlay: null });
+    Object.assign(this.bgFx, { x: 0, y: 0, fadeAmt: 0, grayscale: false, effect: null, overlay: null, monBg: null });
     return strip;
   }
 
@@ -161,17 +164,18 @@ export class BattleScene {
         case 'msg': await this.say(e.text, 'auto'); break;
         case 'item': await this.say(e.text, 'auto'); break;
         case 'turn': break;
+        case 'anim': if (this.opts.anim?.hasCommon && this.views[e.side]?.visible) await this.playMoveAnim({ sub: e.sub }, e.side, e.target); break;
         case 'win': await this.showEnd(e.winner, e.text); break;
       }
     }
   }
 
   /** Plays the move's ROM animation script; sprite/background effects are reset afterwards. */
-  private async playMoveAnim(move: number, side: Side) {
-    const reset = () => { this.fx = { p1: freshFx('p1'), p2: freshFx('p2') }; Object.assign(this.bgFx, { x: 0, y: 0, fadeAmt: 0, grayscale: false, effect: null, overlay: null }); };
+  private async playMoveAnim(move: number | { sub: number }, side: Side, target?: Side) {
+    const reset = () => { this.fx = { p1: freshFx('p1'), p2: freshFx('p2') }; Object.assign(this.bgFx, { x: 0, y: 0, fadeAmt: 0, grayscale: false, effect: null, overlay: null, monBg: null }); };
     reset();
-    const height = (s: Side) => { const v = this.views[s]; const info = v && this.meta.species[v.species]; return info ? 0 : 0; };
-    await this.opts.anim!.play(move, side, this.fx, this.bgFx, height);
+    const height = (s: Side) => { const v = this.views[s]; return v ? this.monBox(s, v).h : 0; }; // empty rows under the sprite
+    await this.opts.anim!.play(move, side, this.fx, this.bgFx, height, target);
     reset();
   }
 
@@ -272,12 +276,14 @@ export class BattleScene {
       const lines = page.split('\n');
       this.text = lines.map(() => '');
       const fast = this.opts.textSpeed === 'fast';
+      const t0 = performance.now(); // A/B/tap while printing finishes the page; it doesn't also turn it
       for (let li = 0; li < lines.length; li++) {
         for (let ci = 1; ci <= lines[li].length; ci++) {
           this.text[li] = lines[li].slice(0, ci);
-          if (!fast) await sleep(22);
+          if (!fast && this.ds.lastPress <= t0) await sleep(22);
         }
       }
+      this.ds.block(100);
       if (wait === 'press') await this.waitA();
       else if (wait === 'auto') { // a beat, or A/B/tap to hurry it; arrows never advance text
         const until = performance.now() + (fast ? 450 : 900);
@@ -299,7 +305,6 @@ export class BattleScene {
   // ------------------------------------------------------------- player input
 
   private async askPlayer(): Promise<string> {
-    this.ds.clearInput(); // presses buffered during messages must not pick a move
     const b = this.engine.battle;
     const me = b.p1.active[0];
     if (this.engine.needs === 'switch') {
@@ -340,6 +345,7 @@ export class BattleScene {
 
   private async commandMenu(): Promise<'fight' | 'bag' | 'run' | 'party'> {
     const ids = ['fight', 'bag', 'run', 'party'] as const;
+    this.ds.block(MENU_GUARD_MS);
     for (;;) {
       const i = await this.ds.next();
       const st = this.bottom as { mode: 'command'; cursor: number };
@@ -367,6 +373,7 @@ export class BattleScene {
       const r = req?.moves?.[k];
       return r ? !r.disabled && (r.pp ?? 1) > 0 : false;
     };
+    this.ds.block(MENU_GUARD_MS);
     for (;;) {
       const i = await this.ds.next();
       const st = this.bottom as { mode: 'fight'; cursor: number };
@@ -398,6 +405,7 @@ export class BattleScene {
   private async partyMenu(forced: boolean): Promise<string | null> {
     const party = this.engine.battle.p1.pokemon;
     this.bottom = { mode: 'party', cursor: forced ? this.firstAlive() : 0, forced };
+    this.ds.block(MENU_GUARD_MS);
     for (;;) {
       const i = await this.ds.next();
       const st = this.bottom as { mode: 'party'; cursor: number; forced: boolean };
@@ -463,10 +471,12 @@ export class BattleScene {
       const f = this.trainer.player.frame;
       g.drawImage(I.player, f * 80, 0, 80, 80, PLAYER.x - 40 + this.trainer.player.dx + slide, MSG_Y - 80, 80, 80);
     }
+    this.opts.anim?.drawSprites(g, true); // effect sprites with BG priority below the battlers
     this.drawMon(g, 'p2');
     this.drawMon(g, 'p1');
+    this.drawMonBg(g);
     this.opts.anim?.draw(g);
-    this.opts.anim?.drawSprites(g);
+    this.opts.anim?.drawSprites(g, false);
     if (this.bgFx.overlay) this.drawEffectBg(g, this.bgFx.overlay);
     this.drawHpBox(g, 'p2');
     this.drawHpBox(g, 'p1');
@@ -476,6 +486,9 @@ export class BattleScene {
   }
 
   private flashCanvas = document.createElement('canvas');
+  private copyCanvas = document.createElement('canvas');
+  private copyLayer = document.createElement('canvas');
+  private mosaicCanvas = document.createElement('canvas');
   private effectCanvas = document.createElement('canvas');
 
   /** SwitchBg layer: the move's ROM background, scrolled (wrapping like a DS text BG) and blended over the battle BG. */
@@ -484,18 +497,44 @@ export class BattleScene {
     if (!e || !img || e.mix <= 0) return;
     const c = this.effectCanvas, eg = c.getContext('2d')!;
     c.width = W; c.height = MSG_Y;
-    const ox = ((Math.round(e.x) % img.width) + img.width) % img.width, oy = ((Math.round(e.y) % img.height) + img.height) % img.height;
-    for (let y = -oy; y < MSG_Y; y += img.height) for (let x = -ox; x < W; x += img.width) eg.drawImage(img, x, y);
+    const wrap = (v: number, n: number) => ((Math.round(v) % n) + n) % n;
+    const ox = wrap(e.x, img.width), oy = wrap(e.y, img.height);
+    const rows = e.rowX;
+    if (rows) { // per-scanline x scroll (HDMA); those rows have y scroll 0
+      for (let r = 0; r < MSG_Y; r++) {
+        const rx = rows[r] ? wrap(rows[r], img.width) : ox, sy = rows[r] ? r % img.height : (r + oy) % img.height;
+        for (let x = -rx; x < W; x += img.width) eg.drawImage(img, 0, sy, img.width, 1, x, r, img.width, 1);
+      }
+    } else for (let y = -oy; y < MSG_Y; y += img.height) for (let x = -ox; x < W; x += img.width) eg.drawImage(img, x, y);
     if (e.fadeAmt > 0) { eg.globalCompositeOperation = 'source-atop'; eg.fillStyle = gxColor(e.fadeColor, e.fadeAmt / 16); eg.fillRect(0, 0, W, MSG_Y); }
     g.globalAlpha = Math.min(1, e.mix);
+    if (e.clip) g.drawImage(c, e.clip[0], 0, e.clip[1] - e.clip[0] + 1, MSG_Y, e.clip[0], 0, e.clip[1] - e.clip[0] + 1, MSG_Y);
+    else g.drawImage(c, 0, 0);
+    g.globalAlpha = 1;
+  }
+
+  private monBgCanvas = document.createElement('canvas');
+  /** LoadPokemonSpriteIntoBg copy (Acid Armor, Spite): the battler drawn as a BG with per-scanline offsets. */
+  private drawMonBg(g: CanvasRenderingContext2D) {
+    const m = this.bgFx.monBg, v = m && this.views[m.side];
+    if (!m || !v?.img || m.mix <= 0) return;
+    const box = this.monBox(m.side, v), [bx, by] = DEFAULT_POS[m.side];
+    const ddx = box.x - (bx - 40), ddy = box.y - (by - 40);
+    const c = this.monBgCanvas, cg = c.getContext('2d')!;
+    c.width = W; c.height = MSG_Y;
+    for (let r = 0; r < 192; r++) {
+      const sy = r + m.oy[r], row = r + ddy;
+      if (sy < 0 || sy >= 80 || row < 0 || row >= MSG_Y) continue;
+      cg.drawImage(v.img, 0, sy, 80, 1, -m.ox[r] + ddx, row, 80, 1);
+    }
+    if (m.dark > 0) { cg.globalCompositeOperation = 'source-atop'; cg.fillStyle = `rgba(0,0,0,${m.dark})`; cg.fillRect(0, 0, W, MSG_Y); }
+    g.globalAlpha = Math.min(1, m.mix);
     g.drawImage(c, 0, 0);
     g.globalAlpha = 1;
   }
 
-  private drawMon(g: CanvasRenderingContext2D, side: Side) {
-    const v = this.views[side];
-    const fx = this.fx[side];
-    if (!v || !v.visible || !v.img || v.scale <= 0 || fx.hide) return;
+  /** Screen box of a battler's 80x80 frame at rest (feet on the platform, ROM height table). */
+  private monBox(side: Side, v: MonView) {
     const back = side === 'p1';
     const pos = back ? PLAYER : ENEMY;
     // ROM height table = empty rows under the sprite, so feet land on the platform: (F back, M back, F front, M front)
@@ -503,42 +542,85 @@ export class BattleScene {
     const h = info ? info.height[(back ? 0 : 2) + (v.gender === 'F' ? 0 : 1)] : 0;
     const foot = back ? MSG_Y + 2 : pos.foot;
     const s = v.scale, size = 80 * s;
-    const x = Math.round(pos.x - size / 2 + v.dx), y = Math.round(foot - (80 - h) * s + v.dy);
-    let src: CanvasImageSource = v.img;
-    const tint = v.flash ? { color: '#f8f8f8', a: 1 } : fx.fadeAmt > 0 ? { color: gxColor(fx.fadeColor, 1), a: fx.fadeAmt / 16 } : null;
-    if (tint) { // send-out white silhouette, or a move animation's palette fade toward a color
-      const c = this.flashCanvas, fg = c.getContext('2d')!;
-      c.width = 80; c.height = 80;
-      fg.drawImage(v.img, 0, 0, 80, 80, 0, 0, 80, 80);
-      fg.globalCompositeOperation = 'source-atop';
-      fg.globalAlpha = tint.a;
-      fg.fillStyle = tint.color; fg.fillRect(0, 0, 80, 80);
-      src = c;
+    return { x: Math.round(pos.x - size / 2 + v.dx), y: Math.round(foot - (80 - h) * s + v.dy), size, foot, h };
+  }
+
+  /** The battler's frame with palette effects applied: send-out flash, fades, gray tint, stat-change overlay. */
+  private monFrame(img: HTMLImageElement, o: { flash?: boolean; fadeAmt: number; fadeColor: number; tint?: [number, number, number] | null; stat?: MonFx['stat'] }, at: { x: number; y: number }, c = this.flashCanvas): CanvasImageSource {
+    const tint = o.flash ? { color: '#f8f8f8', a: 1 } : o.fadeAmt > 0 ? { color: gxColor(o.fadeColor, 1), a: o.fadeAmt / 16 } : null;
+    if (!tint && !o.tint && !o.stat) return img;
+    const fg = c.getContext('2d', { willReadFrequently: !!o.tint })!;
+    c.width = 80; c.height = 80;
+    fg.drawImage(img, 0, 0, 80, 80, 0, 0, 80, 80);
+    if (o.tint) { // TintPalette: gray = (76r + 151g + 29b) >> 8, channel = tone * gray >> 8
+      const d = fg.getImageData(0, 0, 80, 80), p = d.data, [tr, tg, tb] = o.tint;
+      for (let i = 0; i < p.length; i += 4) {
+        const gray = (76 * (p[i] >> 3) + 151 * (p[i + 1] >> 3) + 29 * (p[i + 2] >> 3)) >> 8;
+        p[i] = Math.min(31, (tr * gray) >> 8) * 8.23; p[i + 1] = Math.min(31, (tg * gray) >> 8) * 8.23; p[i + 2] = Math.min(31, (tb * gray) >> 8) * 8.23;
+      }
+      fg.putImageData(d, 0, 0);
     }
-    g.save();
-    if (v.dy > 0) { g.beginPath(); g.rect(0, 0, W, foot); g.clip(); } // faint: sink below the platform line
-    // Move-animation transforms (PokemonSprite center/scale/rotation), relative to the DS default position.
+    fg.globalCompositeOperation = 'source-atop';
+    if (tint) { fg.globalAlpha = tint.a; fg.fillStyle = tint.color; fg.fillRect(0, 0, 80, 80); }
+    const pat = o.stat && this.opts.anim?.statImage(o.stat.img);
+    if (o.stat && pat) { // the pattern scrolls in screen space, seen through the silhouette (OBJ window)
+      fg.globalAlpha = o.stat.mix;
+      const ox = (((Math.round(at.x) + o.stat.x) % 512) + 512) % 512, oy = (((Math.round(at.y) + o.stat.y) % 512) + 512) % 512;
+      for (const dx of [0, 512]) for (const dy of [0, 512]) fg.drawImage(pat, dx - ox, dy - oy);
+    }
+    return c;
+  }
+
+  private drawMon(g: CanvasRenderingContext2D, side: Side) {
+    const v = this.views[side];
+    const fx = this.fx[side];
+    const anim = this.opts.anim?.current;
+    if (!v || !v.visible || !v.img || v.scale <= 0) return;
+    const { x, y, size, foot } = this.monBox(side, v);
     const [bx, by] = DEFAULT_POS[side];
     const cx = x + size / 2 + (fx.x - bx), cy = y + size / 2 + (fx.y - by);
-    g.translate(cx + fx.pivotX, cy + fx.pivotY);
-    if (fx.rot) g.rotate((fx.rot / 65536) * Math.PI * 2); // y-down sprite space: RotZ is clockwise
-    g.translate(-fx.pivotX, -fx.pivotY);
-    g.scale(fx.scaleX / 256, fx.scaleY / 256);
-    if (fx.rowShift) { // scanline distortion: one 1-px row at a time
-      const top = cy - size / 2;
-      for (let r = 0; r < 80; r++) g.drawImage(src, 0, r, 80, 1, -size / 2 + (fx.rowShift.get(Math.round(top + r * v.scale)) ?? 0), -size / 2 + r * v.scale, size, v.scale);
-    } else g.drawImage(src, 0, 0, 80, 80, -size / 2, -size / 2, size, size);
-    g.restore();
-    // OAM copies of this battler made by the move animation (AddPokemonSprite / Confusion / ScalePokemonSprite)
-    for (const c of this.opts.anim?.current?.copies.values() ?? []) {
-      if (c.side !== side || !c.visible) continue;
+    if (!fx.hide) {
+      let src = this.monFrame(v.img, { flash: v.flash, fadeAmt: fx.fadeAmt, fadeColor: fx.fadeColor, stat: fx.stat }, { x: cx - 40, y: cy - 40 });
+      if (fx.mosaic && fx.mosaic > 1) src = mosaic(src, fx.mosaic, this.mosaicCanvas);
       g.save();
-      g.globalAlpha = Math.max(0, Math.min(1, c.alpha));
-      g.translate(x + size / 2 + (c.x - bx), y + size / 2 + (c.y - by));
-      g.scale(c.scaleX, c.scaleY);
-      g.drawImage(v.img, 0, 0, 80, 80, -size / 2, -size / 2, size, size);
+      if (v.dy > 0) { g.beginPath(); g.rect(0, 0, W, foot); g.clip(); } // faint: sink below the platform line
+      if (fx.alpha !== undefined) g.globalAlpha = Math.max(0, Math.min(1, fx.alpha / 31));
+      // Move-animation transforms (PokemonSprite center/scale/rotation), relative to the DS default position.
+      g.translate(cx + fx.pivotX, cy + fx.pivotY);
+      if (fx.rot) g.rotate((fx.rot / 65536) * Math.PI * 2); // y-down sprite space: RotZ is clockwise
+      g.translate(-fx.pivotX, -fx.pivotY);
+      g.scale(fx.scaleX / 256, fx.scaleY / 256);
+      const k = size / 80, p = fx.partial;
+      if (p) { if (p.w > 0 && p.h > 0) g.drawImage(src, p.x, p.y, p.w, p.h, -size / 2 + p.x * k, -size / 2 + p.y * k, p.w * k, p.h * k); }
+      else if (fx.rowShift) { // scanline distortion: one 1-px row at a time
+        const top = cy - size / 2;
+        for (let r = 0; r < 80; r++) g.drawImage(src, 0, r, 80, 1, -size / 2 + (fx.rowShift.get(Math.round(top + r * v.scale)) ?? 0), -size / 2 + r * v.scale, size, v.scale);
+      } else g.drawImage(src, 0, 0, 80, 80, -size / 2, -size / 2, size, size);
       g.restore();
     }
+    // Pokémon sprite copies (OAM) the animation made of this battler; drawn only while their manager is drawn.
+    if (!anim?.shown.has(MON_MGR)) return;
+    const copies = [...anim.copies.values()].filter(c => c.side === side && c.visible).sort((a, b) => b.order - a.order);
+    // XLU copies blend once with what's below them (OBJs never blend with each other): flatten them into one layer first.
+    const xlu = copies.filter(c => c.xlu), layer = this.copyLayer, lg = layer.getContext('2d')!;
+    if (xlu.length) { layer.width = W; layer.height = H; lg.imageSmoothingEnabled = false; }
+    const gMain = g;
+    for (const c of copies) {
+      const a = c.xlu ? 1 : anim.alpha(c);
+      if (a <= 0) continue;
+      const g = c.xlu ? lg : gMain;
+      g.save();
+      g.globalAlpha = Math.min(1, a);
+      const px = x + size / 2 + (c.x - bx), py = y + size / 2 + (c.y - by);
+      g.translate(px, py);
+      if (c.rot) g.rotate((c.rot / 65536) * Math.PI * 2);
+      g.scale(c.scaleX, c.scaleY);
+      let frame = this.monFrame(v.img, c, { x: px - 40, y: py - 40 }, this.copyCanvas);
+      if (c.mosaic && c.mosaic > 1) frame = mosaic(frame, c.mosaic, this.mosaicCanvas);
+      g.drawImage(frame, 0, 0, 80, 80, -size / 2, -size / 2, size, size);
+      g.restore();
+    }
+    if (xlu.length) { gMain.globalAlpha = Math.min(1, anim.alpha(xlu[0])); gMain.drawImage(layer, 0, 0); gMain.globalAlpha = 1; }
   }
 
   private drawHpBox(g: CanvasRenderingContext2D, side: Side) {
@@ -631,6 +713,22 @@ export class BattleScene {
     const order = ['Normal', 'Fighting', 'Flying', 'Poison', 'Ground', 'Rock', 'Bug', 'Ghost', 'Steel', '???', 'Fire', 'Water', 'Grass', 'Electric', 'Psychic', 'Ice', 'Dragon', 'Dark'];
     return this.data.text.types[order.indexOf(t)] ?? t.toUpperCase();
   }
+}
+
+/** OBJ mosaic: blocks of n x n pixels (sampled from each block's top-left like the DS). */
+function mosaic(src: CanvasImageSource, n: number, c: HTMLCanvasElement): HTMLCanvasElement {
+  const small = document.createElement('canvas');
+  const w = Math.ceil(80 / n);
+  small.width = w; small.height = w;
+  const sg = small.getContext('2d')!;
+  sg.imageSmoothingEnabled = false;
+  for (let y = 0; y < w; y++) for (let x = 0; x < w; x++) sg.drawImage(src, x * n, y * n, 1, 1, x, y, 1, 1);
+  c.width = 80; c.height = 80;
+  const g = c.getContext('2d')!;
+  g.imageSmoothingEnabled = false;
+  g.clearRect(0, 0, 80, 80);
+  g.drawImage(small, 0, 0, w * n, w * n);
+  return c;
 }
 
 /** GX RGB555 -> css color with alpha. */

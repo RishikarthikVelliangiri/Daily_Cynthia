@@ -48,22 +48,25 @@ export async function walkIn(ds: DS, font: RomFont, sound: Sound, data: GameData
     }
   }
   py = STOP_Y * T; frame = 0;
-  ds.clearInput();
 
   // Cynthia's speech (msg archive 180 #0), paged like the overworld: \r / \f wait for A.
   sound.playBgm('encounter_champion');
+  sound.preloadBgm('battle_champion');
   const speech = data.text.champion_room[0];
   opts.onText?.(speech.replace(/[\r\f]/g, '\n'));
   for (const page of speech.split(/[\r\f]/).filter(p => p.trim())) {
     const lines = page.split('\n');
     text = lines.map(() => '');
+    const t0 = performance.now(); // a press while printing finishes the page (it doesn't also turn it)
     for (let li = 0; li < lines.length; li++) {
-      for (let ci = 1; ci <= lines[li].length; ci++) { text[li] = lines[li].slice(0, ci); if (opts.textSpeed !== 'fast') await sleep(22); }
+      for (let ci = 1; ci <= lines[li].length; ci++) { text[li] = lines[li].slice(0, ci); if (opts.textSpeed !== 'fast' && ds.lastPress <= t0) await sleep(22); }
     }
+    ds.block(100);
     for (;;) { const i = await ds.next(); if ('tap' in i || i.key === 'a' || i.key === 'b') break; }
   }
   text = [];
   alive = false;
+  void sound.playBgm('battle_champion'); // DP starts the battle theme with the transition, not after it
   await battleTransition(ds);
 }
 

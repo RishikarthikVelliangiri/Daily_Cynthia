@@ -61,13 +61,16 @@ and held items. Those use Showdown's Gen 4 code unchanged.
 ## Presentation
 - **Move animations**: Diamond's own move scripts (`wazaeffect/we.arc`) run in a TypeScript port of the battle animation
   system (`web/src/anim/`): SPL particles (port of Nintendo's particle library, ROM `waza_particle.narc`, drawn with WebGL),
-  move backgrounds (`batt_bg.narc` via overlay 8's table), effect sprites (`effectclact`), the per-move sound effects and
-  the common sprite/background effects (shake, fade, move, scale, blink, rotate). 368 of 467 moves run every command
-  their script uses. Not reproduced: the move-specific sprite routines used by the other 99 (e.g. String Shot's thread,
-  Quick Attack's afterimages, Scary Face's eyes — the rest of those animations still plays), the scanline "wave"
-  background distortion, BG1/BG0 blending tweaks, weather-dependent branches (the no-weather branch is taken), and the
-  six 3D-polygon particle types (drawn as billboards). Stat-change and status animations (common anims) are not played.
-  Timing is 30 Hz like the game (pret `main.c` waits two vblanks per frame).
+  move backgrounds (`batt_bg.narc` via overlay 8's table, including the scanline "wave" scroll), effect sprites
+  (`effectclact`), the per-move sound effects, and all the script functions the 467 move scripts and the common
+  animations call (ported from pret's `script_funcs_*.c`; a test fails if any id lacks a port). The common animations
+  (`we_sub.narc`: status, stat up/down with the ROM's scrolling patterns, held item, weather each turn, trap/Leech
+  Seed/Curse damage, Ingrain) play on the matching battle events. Approximations: DS alpha blending is drawn as canvas
+  opacity (EVA/(EVA+EVB)); OBJ-window effects are reduced to their visible result (Harden's gray flash, the stat
+  pattern clipped to the silhouette, Camouflage hides the battler behind a fading copy); Mean Look's master-brightness
+  flash is a palette fade; weather-dependent script branches take the no-weather branch; the six 3D-polygon particle
+  types are drawn as billboards; Transform pixelates but the battler keeps its own sprite; substitute in/out (common
+  anims 15/16/25/26) are not triggered. Timing is 30 Hz like the game (pret `main.c` waits two vblanks per frame).
 - **Send-out**: the Poké Ball throw is simplified to the white "materialize" grow; cries are the ROM samples.
 - **Touch screen**: the ROM composes the battle menus from many BG/OBJ fragments with runtime palette swaps. The
   menus here are drawn in code following the DP layout and colors, with the ROM font and the ROM's own labels

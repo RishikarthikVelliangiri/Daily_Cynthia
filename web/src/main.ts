@@ -103,7 +103,6 @@ async function boot() {
     for (;;) {
       const { attempt, scored } = startAttempt(localStorage, date);
       transcript(scored ? '— Today’s scored battle —' : `— Practice battle (attempt ${attempt}) —`);
-      ds.clearInput();
       await walkIn(ds, font, sound, data, { playerSprite: settings.trainer, textSpeed: settings.textSpeed, onText: transcript });
       const engine = new DailyBattle(data, puzzle.team, puzzle.battleSeed, DEFAULT_CONFIG);
       const scene = new BattleScene(ds, font, meta, sound, data, engine, {

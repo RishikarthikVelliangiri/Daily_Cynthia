@@ -245,6 +245,16 @@ def effect_bgs(rom, out_dir):
             Image.fromarray(np.dstack([rgb, a]), "RGBA").save(os.path.join(out_dir, "bg", f"{bg_id:02d}{tag}.png"))
             entry[tag] = f"{bg_id:02d}{tag}.png"
         meta.append(entry)
+    # Stat-change overlays (StatChangeUp/Down/Heal/Metal): 4 rows of (NCGR, NCLR, NSCR, NSCR) after the stat-change
+    # task code in overlay 8 -> bg/stat{0..3}.png, scrolled over the battler's silhouette.
+    sbase = ov.index(struct.pack("<4i", 48, 207, 49, 49))
+    for i in range(4):
+        cg, cl, sc, _ = struct.unpack_from("<4i", ov, sbase + 16 * i)
+        px, bpp, _ = ncgr(narc[cg])
+        pal = pal555(struct.unpack_from("<16H", _nclr_data(narc[cl]), 0))
+        idx = screen_indices(nscr(narc[sc]), px, px.shape[1] // 8, bpp) & 15
+        Image.fromarray(np.dstack([pal[idx], np.where(idx == 0, 0, 255).astype(np.uint8)]), "RGBA").save(
+            os.path.join(out_dir, "bg", f"stat{i}.png"))
     return meta
 
 
@@ -271,14 +281,9 @@ def effect_sprites(rom, out_dir, scripts):
     from .gfx import ncer, ncgr_tiles, nclr, render_cell
     sets = set()
     for w in scripts:
-        res = {}
         for _, op, a in disassemble(w):
-            if op == 74: res["c"] = a[1]
-            elif op == 75: res["p"] = a[1]
-            elif op == 76: res["cl"] = a[1]
-            elif op == 77: res["an"] = a[1]
-            elif op in (78, 79) and len(res) == 4:
-                sets.add((res["c"], res["p"], res["cl"], res["an"]))
+            if op in (78, 79):  # sprite template: manager, spriteID/funcID, char, pltt, cell, anim (wechar.. members)
+                sets.add(tuple(a[2:6]))
     chars = rom.narc_lz("wazaeffect/effectclact/wechar.narc")
     pals = rom.narc_lz("wazaeffect/effectclact/wepltt.narc")
     cellb = rom.narc_lz("wazaeffect/effectclact/wecell.narc")
@@ -321,8 +326,10 @@ def extract(rom, out_dir):
     base = os.path.join(out_dir, "anim")
     os.makedirs(os.path.join(base, "particles"), exist_ok=True)
     scripts = [script_words(b) for b in rom.narc("wazaeffect/we.arc")]
+    # Common animations (status, stat change, weather, ...), same bytecode; member order = pret anim_subscripts.order.
+    subs = [script_words(b) for b in rom.narc("wazaeffect/we_sub.narc")]
     used_particles, used_seqs = set(), set()
-    for w in scripts:
+    for w in scripts + subs:
         for _, op, a in disassemble(w):
             if op == 51:
                 used_particles.add(a[1])
@@ -330,6 +337,8 @@ def extract(rom, out_dir):
                 used_seqs.add(a[0])
     with open(os.path.join(base, "scripts.json"), "w") as fh:
         json.dump(scripts, fh, separators=(",", ":"))
+    with open(os.path.join(base, "sub.json"), "w") as fh:
+        json.dump(subs, fh, separators=(",", ":"))
     narc = rom.narc("wazaeffect/effectdata/waza_particle.narc")
     for i in sorted(used_particles):
         resources, textures = parse_spa(narc[i])
@@ -345,7 +354,7 @@ def extract(rom, out_dir):
         with open(os.path.join(base, "particles", f"{i:03d}.json"), "w") as fh:
             json.dump({"resources": resources, "textures": tex_meta}, fh, separators=(",", ":"))
     with open(os.path.join(base, "oam.json"), "w") as fh:
-        json.dump(effect_sprites(rom, base, scripts), fh, separators=(",", ":"))
+        json.dump(effect_sprites(rom, base, scripts + subs), fh, separators=(",", ":"))
     bgs = effect_bgs(rom, base)
     with open(os.path.join(base, "bgs.json"), "w") as fh:
         json.dump(bgs, fh)

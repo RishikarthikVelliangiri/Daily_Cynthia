@@ -9,6 +9,9 @@ import { bigText, button, centered, hit, type Rect, textWindow } from './widgets
 export interface Settings { textSpeed: 'normal' | 'fast'; muted: boolean; readable: boolean; trainer: 'lucas' | 'dawn' }
 export interface MenuCtx { ds: DS; font: RomFont; sound: Sound; meta: GfxMeta }
 
+/** A fresh menu ignores input briefly, so the click that opened it can't also pick an entry. */
+export const MENU_GUARD_MS = 300;
+
 const GOLD: TextStyle = { color: '#f8e080', shadow: '#705818' };
 interface Btn { rect: Rect; label: string; color: string; id: string; sub?: string }
 
@@ -31,7 +34,7 @@ async function pick(ctx: MenuCtx, btns: Btn[], back?: string, drawTop?: () => vo
     });
   };
   render();
-  ds.clearInput();
+  ds.block(MENU_GUARD_MS);
   for (;;) {
     const i = await ds.next();
     if ('tap' in i) {

@@ -121,6 +121,12 @@ export class Sound {
     return this.buffers.get(path)!;
   }
 
+  /** Starts fetching/decoding a track so a later playBgm starts on time. */
+  preloadBgm(name: string) {
+    const m = this.manifest?.bgm[name];
+    if (this.ctx && m) void this.load(`audio/${m.file}`);
+  }
+
   async playBgm(name: string) {
     if (!this.ctx || !this.manifest || this.bgmName === name) return;
     this.stopBgm();
