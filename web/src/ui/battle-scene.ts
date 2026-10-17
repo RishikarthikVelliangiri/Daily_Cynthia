@@ -33,7 +33,9 @@ type Bottom =
   | { mode: 'idle' }
   | { mode: 'command'; cursor: number }
   | { mode: 'fight'; cursor: number }
-  | { mode: 'party'; cursor: number; forced: boolean };
+  | { mode: 'party'; cursor: number; forced: boolean }
+  | { mode: 'action'; mon: number; cursor: number }
+  | { mode: 'summary'; mon: number };
 
 export interface SceneOptions {
   textSpeed: 'normal' | 'fast'; playerName: string; playerSprite: 'lucas' | 'dawn'; onText?: (s: string) => void;
@@ -402,8 +404,18 @@ export class BattleScene {
 
   private static PARTY_RECTS = [0, 1, 2, 3, 4, 5].map(k => ({ x: k % 2 ? 130 : 4, y: 4 + Math.floor(k / 2) * 48, w: 122, h: 44 }));
 
+  private monImgs = new Map<Pokemon, HTMLImageElement | null>();
+  private async loadPartyImgs() {
+    await Promise.all(this.engine.battle.p1.pokemon.map(async p => {
+      if (this.monImgs.get(p)) return;
+      const female = p.gender === 'F' && (await this.hasFemaleSprite(p.species.num, false));
+      this.monImgs.set(p, await image(pokemonSprite(p.species.num, false, female)).catch(() => null));
+    }));
+  }
+
   private async partyMenu(forced: boolean): Promise<string | null> {
     const party = this.engine.battle.p1.pokemon;
+    await this.loadPartyImgs();
     this.bottom = { mode: 'party', cursor: forced ? this.firstAlive() : 0, forced };
     this.ds.block(MENU_GUARD_MS);
     for (;;) {
@@ -422,11 +434,61 @@ export class BattleScene {
         if (nx >= 0 && nx < party.length) { st.cursor = nx; void this.sound.playSe('se_cursor'); }
         continue;
       }
+      void this.sound.playSe('se_select');
+      const act = await this.partyAction(pick);
+      if (act === 'summary') pick = await this.summary(pick);
+      if (act !== 'switch') { this.bottom = { mode: 'party', cursor: pick, forced }; this.ds.block(MENU_GUARD_MS); continue; }
       const mon = party[pick];
+      this.bottom = { mode: 'party', cursor: pick, forced };
       if (mon.fainted) { await this.say(`${this.dispName(mon)} has no energy\nleft to battle!`, 'auto'); continue; }
       if (mon.isActive) { await this.say(`${this.dispName(mon)} is already\nin battle!`, 'auto'); continue; }
-      void this.sound.playSe('se_select');
       return `switch ${pick + 1}`;
+    }
+  }
+
+  private static ACTION_RECTS = [28, 76, 124].map(y => ({ x: 40, y, w: 176, h: 40 })); // SWITCH, SUMMARY, CANCEL
+
+  /** The little menu after picking a party member. */
+  private async partyAction(mon: number): Promise<'switch' | 'summary' | null> {
+    this.bottom = { mode: 'action', mon, cursor: 0 };
+    this.ds.block(MENU_GUARD_MS);
+    for (;;) {
+      const i = await this.ds.next();
+      const st = this.bottom as { mode: 'action'; cursor: number };
+      let pick = -1;
+      if ('tap' in i) { pick = BattleScene.ACTION_RECTS.findIndex(r => hit(r, i.tap)); if (pick < 0) continue; }
+      else if (i.key === 'b') return null;
+      else if (i.key === 'a') pick = st.cursor;
+      else {
+        const nx = st.cursor + (i.key === 'up' || i.key === 'left' ? -1 : 1);
+        if (nx >= 0 && nx < 3) { st.cursor = nx; void this.sound.playSe('se_cursor'); }
+        continue;
+      }
+      return pick === 0 ? 'switch' : pick === 1 ? 'summary' : null;
+    }
+  }
+
+  private static SUMMARY_NAV = { prev: { x: 8, y: 154, w: 56, h: 32 }, back: { x: 76, y: 154, w: 104, h: 32 }, next: { x: 192, y: 154, w: 56, h: 32 } };
+
+  /** Summary screen (stats on the top screen, moves on the bottom); returns the party index it ended on. */
+  private async summary(start: number): Promise<number> {
+    const n = this.engine.battle.p1.pokemon.length, N = BattleScene.SUMMARY_NAV;
+    let mon = start;
+    this.bottom = { mode: 'summary', mon };
+    this.ds.block(MENU_GUARD_MS);
+    for (;;) {
+      const i = await this.ds.next();
+      let d = 0;
+      if ('tap' in i) {
+        if (hit(N.back, i.tap)) return mon;
+        d = hit(N.prev, i.tap) ? -1 : hit(N.next, i.tap) ? 1 : 0;
+      } else if (i.key === 'a' || i.key === 'b') return mon;
+      else d = i.key === 'left' || i.key === 'up' ? -1 : 1;
+      if (d) {
+        mon = (mon + d + n) % n;
+        this.bottom = { mode: 'summary', mon };
+        void this.sound.playSe('se_cursor');
+      }
     }
   }
 
@@ -448,6 +510,7 @@ export class BattleScene {
 
   private drawTop(g: CanvasRenderingContext2D) {
     const I = this.imgs;
+    if (this.bottom.mode === 'summary') return this.drawSummary(g, this.engine.battle.p1.pokemon[this.bottom.mon]);
     g.clearRect(0, 0, W, H);
     const bg = this.bgFx;
     g.save();
@@ -693,19 +756,92 @@ export class BattleScene {
         const p = party[k];
         if (!p) return;
         button(g, r, p.fainted ? '#784848' : p.isActive ? '#3878a8' : '#4c8c58', b.cursor === k);
-        this.font.draw(g, this.dispName(p), r.x + 8, r.y + 4, STYLE_LIGHT);
-        this.font.draw(g, `Lv${p.level}`, r.x + r.w - 8 - this.font.width(`Lv${p.level}`), r.y + 4, STYLE_LIGHT);
-        const frac = p.hp / p.maxhp;
-        g.fillStyle = '#303030'; g.fillRect(r.x + 8, r.y + 24, 64, 4);
-        g.fillStyle = frac > 0.5 ? '#58d080' : frac > 0.2 ? '#e0c020' : '#e05040';
-        g.fillRect(r.x + 8, r.y + 24, Math.ceil(64 * frac), 4);
+        const img = this.monImgs.get(p);
+        if (img) g.drawImage(img, 0, 0, 80, 80, r.x + 3, r.y + 2, 40, 40);
+        const tx = r.x + 46, bw = r.w - 54;
+        this.font.draw(g, this.dispName(p), tx, r.y + 1, STYLE_LIGHT);
+        this.font.draw(g, `Lv${p.level}`, tx, r.y + 15, STYLE_LIGHT);
         const hp = `${p.hp}/${p.maxhp}`;
-        this.font.draw(g, hp, r.x + r.w - 8 - this.font.width(hp), r.y + 24, STYLE_LIGHT);
+        this.font.draw(g, hp, tx + bw - this.font.width(hp), r.y + 15, STYLE_LIGHT);
+        const frac = p.hp / p.maxhp;
+        g.fillStyle = '#303030'; g.fillRect(tx, r.y + 35, bw, 4);
+        g.fillStyle = frac > 0.5 ? '#58d080' : frac > 0.2 ? '#e0c020' : '#e05040';
+        g.fillRect(tx, r.y + 35, Math.ceil(bw * frac), 4);
       });
       if (!b.forced) {
         button(g, BattleScene.CANCEL, '#606870', false);
         this.font.draw(g, 'CANCEL', 128 - this.font.width('CANCEL') / 2, 162, STYLE_LIGHT);
       }
+    } else if (b.mode === 'action') {
+      const p = this.engine.battle.p1.pokemon[b.mon];
+      const head = `${this.dispName(p)}  Lv${p.level}`;
+      this.font.draw(g, head, 128 - this.font.width(head) / 2, 6, STYLE_LIGHT);
+      [['SWITCH', '#48a848'], ['SUMMARY', '#3878d8'], ['CANCEL', '#606870']].forEach(([label, color], k) => {
+        const r = BattleScene.ACTION_RECTS[k];
+        button(g, r, color, b.cursor === k);
+        this.font.draw(g, label, 128 - this.font.width(label) / 2, r.y + r.h / 2 - 8, STYLE_LIGHT);
+      });
+    } else if (b.mode === 'summary') {
+      const p = this.engine.battle.p1.pokemon[b.mon];
+      for (let k = 0; k < 4; k++) {
+        const r = { x: 8, y: 6 + k * 36, w: 240, h: 34 };
+        const slot = p.moveSlots[k];
+        if (!slot) { button(g, r, '#404850', false); continue; }
+        const mv = dex.moves.get(slot.id), rom = this.data.moves[mv.num];
+        button(g, r, TYPE_COLORS[mv.type] ?? '#888', false);
+        this.font.draw(g, rom?.name ?? mv.name, r.x + 8, r.y + 1, STYLE_LIGHT);
+        const pp = `PP ${slot.pp}/${slot.maxpp}`;
+        this.font.draw(g, pp, r.x + r.w - 8 - this.font.width(pp), r.y + 1, STYLE_LIGHT);
+        const cat = { Physical: 'PHYS', Special: 'SPEC', Status: 'STAT' }[rom?.category ?? mv.category] ?? '';
+        const info = `${this.typeName(mv.type)}  ${cat}  PWR ${rom && rom.power > 1 ? rom.power : '--'}  ACC ${rom?.accuracy || '--'}`;
+        this.font.draw(g, info, r.x + 8, r.y + 16, STYLE_LIGHT);
+      }
+      for (const [k, r] of Object.entries(BattleScene.SUMMARY_NAV)) {
+        button(g, r, k === 'back' ? '#606870' : '#3878d8', false);
+        if (k === 'back') { this.font.draw(g, 'BACK', r.x + (r.w - this.font.width('BACK')) / 2, r.y + 8, STYLE_LIGHT); continue; }
+        const d = k === 'prev' ? -1 : 1, cx = r.x + r.w / 2; // font has no arrow glyphs
+        g.fillStyle = '#f8f8f8';
+        g.beginPath(); g.moveTo(cx - d * 6, r.y + 9); g.lineTo(cx - d * 6, r.y + 23); g.lineTo(cx + d * 6, r.y + 16); g.fill();
+      }
+    }
+  }
+
+  /** Top screen while the summary is open: sprite, types, stats, ability, item, nature. */
+  private drawSummary(g: CanvasRenderingContext2D, p: Pokemon) {
+    g.clearRect(0, 0, W, H);
+    g.fillStyle = '#284868'; g.fillRect(0, 0, W, H);
+    g.fillStyle = '#386898'; g.fillRect(0, 0, W, 24);
+    g.fillStyle = '#f0f0f8'; g.fillRect(4, 28, 92, 92);
+    const img = this.monImgs.get(p);
+    if (img) g.drawImage(img, 0, 0, 80, 80, 10, 34, 80, 80);
+    const end = this.font.draw(g, this.dispName(p), 8, 4, STYLE_LIGHT);
+    if (p.gender === 'M' || p.gender === 'F') this.font.draw(g, p.gender === 'M' ? '♂' : '♀', end, 4, p.gender === 'M' ? { color: '#80b0ff', shadow: '#284868' } : { color: '#ff90a0', shadow: '#284868' });
+    this.font.draw(g, `Lv${p.level}`, 200, 4, STYLE_LIGHT);
+    let tx = 104;
+    for (const t of p.getTypes()) {
+      const w = this.font.width(this.typeName(t)) + 10;
+      g.fillStyle = '#101820'; g.fillRect(tx - 1, 29, w + 2, 18);
+      g.fillStyle = TYPE_COLORS[t] ?? '#888'; g.fillRect(tx, 30, w, 16);
+      this.font.draw(g, this.typeName(t), tx + 5, 30, STYLE_LIGHT);
+      tx += w + 6;
+    }
+    const frac = p.hp / p.maxhp;
+    const hp = p.fainted ? 'FAINTED' : `HP ${p.hp}/${p.maxhp}`;
+    this.font.draw(g, hp, 104, 49, STYLE_LIGHT);
+    g.fillStyle = '#101820'; g.fillRect(103, 66, 142, 12);
+    g.fillStyle = '#505050'; g.fillRect(104, 67, 140, 10);
+    g.fillStyle = frac > 0.5 ? '#58d080' : frac > 0.2 ? '#e0c020' : '#e05040';
+    g.fillRect(104, 67, Math.ceil(140 * frac), 10);
+    const st = p.storedStats;
+    ([['ATTACK', st.atk], ['DEFENSE', st.def], ['SP. ATK', st.spa], ['SP. DEF', st.spd], ['SPEED', st.spe]] as const).forEach(([l, v], k) => {
+      this.font.draw(g, l, 104, 84 + k * 14, STYLE_LIGHT);
+      const n = String(v);
+      this.font.draw(g, n, 240 - this.font.width(n), 84 + k * 14, STYLE_LIGHT);
+    });
+    const lines: [string, string, number][] = [['NATURE', p.set.nature || '--', 126], ['ABILITY', p.getAbility().name, 150], ['ITEM', p.item ? dex.items.get(p.item).name : '--', 168]];
+    for (const [l, v, y] of lines) {
+      this.font.draw(g, l, 8, y, { color: '#f8d878', shadow: '#383838' });
+      this.font.draw(g, v, 62, y, STYLE_LIGHT);
     }
   }
 

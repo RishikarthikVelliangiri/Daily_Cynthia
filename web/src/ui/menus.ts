@@ -67,7 +67,7 @@ export async function titleScreen(ctx: MenuCtx, date: string, rec: DayRecord): P
     g.drawImage(plat, 192 + ctx.meta.platform_enemy.originX, 104 + ctx.meta.platform_enemy.originY);
     g.drawImage(cyn, 0, 0, 80, 80, 152, 28, 80, 80);
     bigText(g, font, 'DAILY', 14, 26, 2, GOLD);
-    bigText(g, font, 'CHAMPION', 14, 54, 2, GOLD);
+    bigText(g, font, 'CYNTHIA', 14, 54, 2, GOLD);
     font.draw(g, `No. ${dayNumber(date)}  ·  ${date}`, 16, 92, STYLE_LIGHT);
     textWindow(g, { x: 2, y: 142, w: 252, h: 48 });
     const status = rec.scored

@@ -100,7 +100,7 @@ export class Translator {
         const side = this.who(p[2]);
         const det = p[3].split(', ');
         const sp = dex.species.get(det[0]);
-        const level = Number((det.find(d => d.startsWith('L')) ?? 'L100').slice(1));
+        const level = Number((det.find(d => /^L\d+$/.test(d)) ?? 'L100').slice(1));
         const gender = det.find(d => d === 'M' || d === 'F') ?? '';
         const name = this.displayName(this.data.species[sp.num].name);
         const prev = this.names[side];

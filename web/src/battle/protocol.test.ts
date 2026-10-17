@@ -6,6 +6,10 @@ let data: GameData;
 beforeAll(async () => { data = await loadGameDataFromDisk(); });
 
 describe('protocol translator (ROM text)', () => {
+  it('reads the level for species whose name starts with L (Lucario)', () => {
+    const ev = new Translator(data).translate(['|switch|p2a: Lucario|Lucario, L76, M|100/100']);
+    expect(ev[0]).toMatchObject({ t: 'switch', species: 448, level: 76 });
+  });
   it('builds DP messages for a typical exchange', () => {
     const tr = new Translator(data);
     const ev = tr.translate([
