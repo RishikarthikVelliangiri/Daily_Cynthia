@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <rect width="64" height="64" rx="14" fill="#0e1330"/>
+  <!-- long hair behind the head -->
+  <path d="M32 6C17 6 10 18 10 32c0 11 2 20 5 27h34c3-7 5-16 5-27C54 18 47 6 32 6Z" fill="#e9c75d"/>
+  <path d="M10 32c0 11 2 20 5 27h6c-4-8-6-17-6-27ZM54 32c0 11-2 20-5 27h-6c4-8 6-17 6-27Z" fill="#c9a23a"/>
+  <!-- black coat -->
+  <path d="M14 64c1-9 8-14 18-14s17 5 18 14Z" fill="#15151c"/>
+  <path d="M26 50l6 8 6-8Z" fill="#efeff4"/>
+  <!-- face -->
+  <path d="M32 18c-8 0-13 5-13 13 0 8 5 15 13 15s13-7 13-15c0-8-5-13-13-13Z" fill="#f7dcc4"/>
+  <!-- fringe sweeping over the left eye -->
+  <path d="M32 11C21 11 17 20 18 32c4-3 8-9 9-14 3 3 9 6 18 6 0-9-5-13-13-13Z" fill="#f2d070"/>
+  <path d="M18 32c4-3 8-9 9-14 1 5 0 11-3 17-2 3-5 4-6-3Z" fill="#e9c75d"/>
+  <!-- eye, brow, mouth -->
+  <path d="M34 29.500c2.200-1.200 5.200-1.200 7.400 0" stroke="#2a2433" stroke-width="1.800" stroke-linecap="round" fill="none"/>
+  <ellipse cx="38" cy="32.500" rx="2.100" ry="2.600" fill="#3a3a52"/>
+  <circle cx="38.600" cy="31.600" r=".7" fill="#fff"/>
+  <path d="M33.500 40c1.700 1.100 3.500 1.100 5.200 0" stroke="#c0675f" stroke-width="1.400" stroke-linecap="round" fill="none"/>
+  <!-- gold hair ornament -->
+  <path d="M15 20l4-3 3 4-4 3Z" fill="#8a6a1c"/>
+  <path d="M16.600 20l2-1.500 1.500 2-2 1.500Z" fill="#ffe58a"/>
+</svg>

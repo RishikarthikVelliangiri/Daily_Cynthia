@@ -1,6 +1,6 @@
 # Known deviations from Pokémon Diamond
 
-Honest list of where Daily Champion differs from the real game, and why.
+Honest list of where Daily Cynthia differs from the real game, and why.
 
 ## Battle data (ROM vs. Showdown)
 `romShowdownDiffs()` compares every species (stats, types, abilities) and move (power, accuracy, PP, type,

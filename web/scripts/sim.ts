@@ -11,7 +11,7 @@ const lvArg = args[args.indexOf('--level') + 1];
 const cynthiaLevel = args.includes('--level') ? (lvArg === 'rom' ? null : Number(lvArg)) : 76;
 const data = await loadGameDataFromDisk();
 const puzzle = dailyPuzzle(data, date);
-console.log(`Daily Champion ${puzzle.date}  seed ${puzzle.seed}  rerolls ${puzzle.rerolls}`);
+console.log(`Daily Cynthia ${puzzle.date}  seed ${puzzle.seed}  rerolls ${puzzle.rerolls}`);
 for (const m of puzzle.team) {
   console.log(`  Lv${m.level} ${data.species[m.species].name.padEnd(11)} [${m.ability}] ${m.moves.map(id => data.moves[id].name).join(' / ')}`);
 }

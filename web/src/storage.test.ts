@@ -37,7 +37,7 @@ describe('daily record', () => {
     const s = new Mem();
     finishAttempt(s, '2026-10-16', startAttempt(s, '2026-10-16').attempt, outcome('win'));
     const t = shareText(loadDay(s, '2026-10-16'));
-    expect(t).toContain(`Daily Champion #${dayNumber('2026-10-16')}`);
+    expect(t).toContain(`Daily Cynthia #${dayNumber('2026-10-16')}`);
     expect(t).toContain('🟩⬛🟩⬛⬛🟩');
     expect(t).toContain('23 turns');
     expect(t).not.toMatch(/Garchomp|Spiritomb/i);

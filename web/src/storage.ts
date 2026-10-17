@@ -65,9 +65,9 @@ const mark = (alive: boolean[]) => alive.map(a => (a ? '🟩' : '⬛')).join('')
 export function shareText(rec: DayRecord): string {
   const n = dayNumber(rec.date);
   const sc = rec.scored;
-  if (!sc) return `Daily Champion #${n} · ${rec.date}\nIn progress…`;
+  if (!sc) return `Daily Cynthia #${n} · ${rec.date}\nIn progress…`;
   const head = sc.result === 'win' ? '🏆 Defeated Champion Cynthia' : sc.abandoned ? '🏳️ Left the battle' : '💥 Lost to Champion Cynthia';
-  const lines = [`Daily Champion #${n} · ${rec.date}`, head];
+  const lines = [`Daily Cynthia #${n} · ${rec.date}`, head];
   if (sc.playerLeft.length) lines.push(`Me      ${mark(sc.playerLeft)}`, `Cynthia ${mark(sc.cynthiaLeft)}`, `${sc.turns} turns`);
   if (rec.attempts > 1) lines.push(`Attempts today: ${rec.attempts}`);
   return lines.join('\n');

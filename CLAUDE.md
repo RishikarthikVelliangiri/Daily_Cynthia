@@ -1,4 +1,4 @@
-# Daily Champion
+# Daily Cynthia
 
 Wordle-style daily battle vs. Champion Cynthia (Pokémon Diamond). One date-seeded puzzle per UTC day: 6 random legal level-76 Pokémon vs. Cynthia, Gen 4 mechanics, authentic DS look.
 

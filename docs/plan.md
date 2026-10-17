@@ -1,4 +1,4 @@
-# Daily Champion — Implementation Plan
+# Daily Cynthia — Implementation Plan
 
 > **For agentic workers:** Execute with superpowers:executing-plans (native) — the user asked for a single uninterrupted build. Steps use `- [ ]` checkboxes.
 
